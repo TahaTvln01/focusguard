@@ -15,7 +15,3 @@ Ayarlar → Uygulamalar → FocusGuard → Kaldır.
 
 ## Katkı
 PR'lar `dev` dalına; bkz. [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Sürüm çıkarma (repo sahibi)
-- Bir kez: Settings → Secrets and variables → Actions → `KEYSTORE_B64` (base64 keystore, alias `focusguard`) ve `KEYSTORE_PASS`.
-- `app/build.gradle` içinde `versionName`/`versionCode` artır, `main`e birleştir → Actions imzalı APK'yı derleyip Release oluşturur.
