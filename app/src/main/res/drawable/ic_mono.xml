@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shield with a "pause" cut-out: guard + break. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path
+        android:fillColor="@color/green"
+        android:fillType="evenOdd"
+        android:pathData="M54,28 L75,36 V53 C75,66.5 66,77 54,81 C42,77 33,66.5 33,53 V36 Z M45.5,44 H51 V63 H45.5 Z M57,44 H62.5 V63 H57 Z" />
+</vector>

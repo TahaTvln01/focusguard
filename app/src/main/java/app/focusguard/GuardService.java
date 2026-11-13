@@ -34,14 +34,12 @@ public final class GuardService extends AccessibilityService
     private static final long DUMP_DELAY_MS = 6000;
 
     private static final long ACT_GAP_MS = 800;        // min gap between redirects
-    private static final long MENU_WAIT_MS = 1500;     // wait for IG "Following" menu
-    private static final long FOLLOW_GRACE_MS = 20000; // don't re-force Following within this window
     private static final int MAX_ERRORS = 3;
 
     // settings
     private final boolean[] master = new boolean[2], brk = new boolean[2], counter = new boolean[2];
     private final long[] periodMs = new long[2], breakMs = new long[2];
-    private boolean igReels, igFollowing, igSwipe, ytShorts, ytSwipe, ytAds;
+    private boolean igReels, igSwipe, ytShorts, ytSwipe;
 
     // break state (per app); times are SystemClock.elapsedRealtime()
     private int fg = -1;            // target app currently in foreground (only tracked while its break is on)
@@ -65,11 +63,8 @@ public final class GuardService extends AccessibilityService
     private SharedPreferences prefs;
     private int errors;
     private int lastApp = -1;
-    private long lastAct, lastSkip;
+    private long lastAct;
     private int pageBase;      // identity of the first reel/short opened (0 = none)
-    private long menuDeadline; // >0 while waiting for the IG menu
-    private long lastFollow = -FOLLOW_GRACE_MS;
-    private int followFails;
 
     @Override
     protected void onServiceConnected() {
@@ -122,11 +117,9 @@ public final class GuardService extends AccessibilityService
         watchAll(false);
         refresh(SystemClock.elapsedRealtime());
         igReels = b("ig_reels");
-        igFollowing = b("ig_following");
         igSwipe = b("ig_swipe");
         ytShorts = b("yt_shorts");
         ytSwipe = b("yt_swipe");
-        ytAds = b("yt_ads");
     }
 
     private static int clamp(int v, int lo, int hi) {
@@ -179,7 +172,7 @@ public final class GuardService extends AccessibilityService
             return;
         }
         if (!master[a]) return;
-        boolean feeds = a == IG ? (igReels || igFollowing || igSwipe) : (ytShorts || ytSwipe || ytAds);
+        boolean feeds = a == IG ? (igReels || igSwipe) : (ytShorts || ytSwipe);
         if (!feeds && !brk[a]) return;
 
         AccessibilityNodeInfo root = foreground(a);
@@ -188,7 +181,6 @@ public final class GuardService extends AccessibilityService
         if (a != lastApp) {
             lastApp = a;
             pageBase = 0;
-            menuDeadline = 0;
         }
         if (brk[a]) {
             if (now < breakUntil[a]) { kick(a, now); return; }
@@ -341,7 +333,7 @@ public final class GuardService extends AccessibilityService
     // ---- feeds ----
 
     private void instagram(AccessibilityNodeInfo root, long now) {
-        if (!(igReels || igFollowing || igSwipe)) return;
+        if (!(igReels || igSwipe)) return;
         if (Rules.tabSelected(root, Rules.IG, Rules.IG_REELS_TAB_ID, Rules.IG_REELS_TAB_LABEL)) {
             pageBase = 0;
             if (igReels && ready(now)) {
@@ -352,17 +344,9 @@ public final class GuardService extends AccessibilityService
             return;
         }
         if (igSwipe) guardPager(root, Rules.IG, Rules.IG_REEL_PAGER_ID, now); else pageBase = 0;
-        if (igFollowing) forceFollowing(root, now);
     }
 
     private void youtube(AccessibilityNodeInfo root, long now) {
-        if (ytAds && now - lastSkip >= 1000) {
-            AccessibilityNodeInfo skip = Rules.byId(root, Rules.YT, Rules.YT_SKIP_AD_ID);
-            if (skip != null) {
-                lastSkip = now;
-                Rules.click(skip);
-            }
-        }
         if (!(ytShorts || ytSwipe)) return;
         if (Rules.tabSelected(root, Rules.YT, null, Rules.YT_SHORTS_TAB_LABEL)) {
             pageBase = 0;
@@ -391,36 +375,6 @@ public final class GuardService extends AccessibilityService
         if (key != pageBase && ready(now)) {
             pageBase = 0;
             performGlobalAction(GLOBAL_ACTION_BACK);
-        }
-    }
-
-    /** IG home: tap logo -> "Following". Gives up after repeated failures. */
-    private void forceFollowing(AccessibilityNodeInfo root, long now) {
-        if (followFails >= 3) return;
-        if (menuDeadline != 0) {
-            if (now <= menuDeadline) {
-                AccessibilityNodeInfo item = Rules.byLabel(root, Rules.IG_FOLLOWING_LABEL, Rules.ANY);
-                if (item != null && Rules.click(item)) {
-                    menuDeadline = 0;
-                    followFails = 0;
-                    lastFollow = now;
-                }
-                return;
-            }
-            menuDeadline = 0;
-            followFails++;
-            lastFollow = now;
-            return;
-        }
-        if (now - lastFollow < FOLLOW_GRACE_MS) return;
-        AccessibilityNodeInfo logo = Rules.byId(root, Rules.IG, Rules.IG_LOGO_ID);
-        if (logo == null) logo = Rules.byLabel(root, Rules.IG_LOGO_LABEL, Rules.TOP);
-        if (logo == null) return;
-        if (Rules.click(logo)) {
-            menuDeadline = now + MENU_WAIT_MS;
-        } else {
-            followFails++;
-            lastFollow = now;
         }
     }
 }

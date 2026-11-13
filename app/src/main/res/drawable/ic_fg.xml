@@ -1,10 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Shield with a "pause" cut-out: guard + break. -->
+<!-- 3D shield: drop shadow, metallic rim (frame), shaded body, left-facet highlight, engraved pause bars. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <path
-        android:fillColor="@color/green"
-        android:fillType="evenOdd"
-        android:pathData="M54,28 L75,36 V53 C75,66.5 66,77 54,81 C42,77 33,66.5 33,53 V36 Z M45.5,44 H51 V63 H45.5 Z M57,44 H62.5 V63 H57 Z" />
+    <!-- shadow -->
+    <group android:translateY="3">
+        <path android:fillColor="#66000000"
+            android:pathData="M54,24.5 L78.5,33.6 V53 C78.5,68.5 68,80.5 54,85 C40,80.5 29.5,68.5 29.5,53 V33.6 Z" />
+    </group>
+    <!-- rim -->
+    <path android:pathData="M54,24.5 L78.5,33.6 V53 C78.5,68.5 68,80.5 54,85 C40,80.5 29.5,68.5 29.5,53 V33.6 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="36" android:startY="26" android:endX="72" android:endY="84">
+                <item android:offset="0" android:color="#FFA6FFC6" />
+                <item android:offset="0.45" android:color="#FF1DB954" />
+                <item android:offset="1" android:color="#FF07401B" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- body -->
+    <path android:pathData="M54,28 L75,36 V53 C75,66.5 66,77 54,81 C42,77 33,66.5 33,53 V36 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear" android:startX="54" android:startY="28" android:endX="54" android:endY="81">
+                <item android:offset="0" android:color="#FF35E070" />
+                <item android:offset="1" android:color="#FF0F8A39" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- left facet highlight -->
+    <path android:fillColor="#24FFFFFF"
+        android:pathData="M54,28 L33,36 V53 C33,66.5 42,77 54,81 Z" />
+    <!-- pause bars: light lower-right edge, then dark engraved face -->
+    <path android:fillColor="#55FFFFFF"
+        android:pathData="M46.3,44.8 H51.8 V63.8 H46.3 Z M57.8,44.8 H63.3 V63.8 H57.8 Z" />
+    <path android:fillColor="#FF0E0E0E"
+        android:pathData="M45.5,44 H51 V63 H45.5 Z M57,44 H62.5 V63 H57 Z" />
 </vector>

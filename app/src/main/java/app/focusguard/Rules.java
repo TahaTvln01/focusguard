@@ -22,22 +22,12 @@ final class Rules {
     static final String[] IG_HOME_TAB_LABEL = {"Home", "Ana Sayfa"};
     /** Vertical pager of the full-screen reel viewer. */
     static final String[] IG_REEL_PAGER_ID = {"clips_viewer_view_pager"};
-    /** Instagram logo at top-left of the home feed (opens Following/Favorites menu). */
-    static final String[] IG_LOGO_ID = {"title_logo", "action_bar_title_logo", "title_logo_chevron",
-            "action_bar_title_chevron", "feed_title", "action_bar_title"};
-    /** Fallback: same control found by its label in the top bar. */
-    static final String[] IG_LOGO_LABEL = {"Instagram", "For you", "Senin için", "Sana özel"};
-    /** "Following" entry of that menu. */
-    static final String[] IG_FOLLOWING_LABEL = {"Following", "Takip Ettiklerin", "Takip Edilenler", "Takip"};
 
     // ---- YouTube ----
     static final String[] YT_SHORTS_TAB_LABEL = {"Shorts"};
     static final String[] YT_HOME_TAB_LABEL = {"Home", "Ana Sayfa"};
     /** Vertical pager of the Shorts player. */
     static final String[] YT_SHORTS_PAGER_ID = {"reel_recycler"};
-
-    /** "Skip ad" button of the video player. */
-    static final String[] YT_SKIP_AD_ID = {"skip_ad_button", "modern_skip_ad_text", "skip_ad_button_text"};
 
     /** Bottom-bar labels are only accepted below this fraction of the window height. */
     static final float BOTTOM_BAR_FROM = 0.80f;

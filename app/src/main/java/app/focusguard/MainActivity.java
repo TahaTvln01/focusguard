@@ -1,6 +1,7 @@
 package app.focusguard;
 
 import android.app.Activity;
+import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
@@ -10,6 +11,7 @@ import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.CountDownTimer;
 import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputFilter;
@@ -18,6 +20,8 @@ import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -30,6 +34,8 @@ public final class MainActivity extends Activity {
 
     private static final int BG = 0xFF121212, CARD = 0xFF181818, FIELD = 0xFF2A2A2A,
             GREEN = 0xFF1DB954, WHITE = 0xFFFFFFFF, GREY = 0xFFB3B3B3, OFF = 0xFF535353, LINE = 0xFF333333, BLACK = 0xFF000000;
+    private static final String CONFIRM_PHRASE = "Bunu gerçekten istiyorum";
+    private static final int CONFIRM_SEC = 10;
     private static final int[][] STATES = {{android.R.attr.state_checked}, {}};
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT, WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
 
@@ -64,13 +70,11 @@ public final class MainActivity extends Activity {
 
         box.addView(card("Instagram", "ig", new String[][]{
                 {"ig_reels", "Reels sekmesi → ana sayfa"},
-                {"ig_following", "Ana akış → yalnızca takip edilenler"},
                 {"ig_swipe", "Açılan reel izlenir, sonrakine kaydırma engellenir"},
         }));
         box.addView(card("YouTube", "yt", new String[][]{
                 {"yt_shorts", "Shorts sekmesi → ana sayfa"},
                 {"yt_swipe", "Açılan short izlenir, sonrakine kaydırma engellenir"},
-                {"yt_ads", "Atlanabilir reklamları otomatik atla"},
         }));
 
         TextView diag = text("Tanılama: bir özellik çalışmıyorsa düğmeye bas, 6 sn içinde Instagram/YouTube'da ilgili ekranı aç. "
@@ -140,7 +144,7 @@ public final class MainActivity extends Activity {
                 GuardService.MIN_BREAK_SEC, GuardService.MAX_BREAK_SEC));
         times.addView(text(" sn mola", 15, GREY, false));
         more.addView(times);
-        more.addView(toggle("Ekranda sayaç göster (sürükleyerek taşınır)", p + "_counter", 15, false, null));
+        more.addView(toggle("Ekranda sayaç göster (sürükleyerek taşınır)", p + "_counter", 15, false, null, null, false));
 
         final Switch[] brk = new Switch[1];
         sub.addView(toggle("Zorunlu mola", p + "_break", 15, false, on -> enable(more, on), brk));
@@ -173,8 +177,13 @@ public final class MainActivity extends Activity {
         return toggle(label, key, sp, bold, extra, null);
     }
 
+    private View toggle(String label, String key, int sp, boolean bold, OnToggle extra, Switch[] out) {
+        return toggle(label, key, sp, bold, extra, out, true);
+    }
+
     /** Row: label | short vertical bar | switch (the bar is shorter than the row, so bars never join). */
-    private View toggle(String label, final String key, int sp, boolean bold, final OnToggle extra, Switch[] out) {
+    private View toggle(final String label, final String key, int sp, boolean bold, final OnToggle extra,
+                        Switch[] out, final boolean guarded) {
         LinearLayout row = new LinearLayout(this);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.setMinimumHeight(dp(52));
@@ -194,7 +203,21 @@ public final class MainActivity extends Activity {
         s.setThumbTintList(new ColorStateList(STATES, new int[]{WHITE, GREY}));
         s.setTrackTintList(new ColorStateList(STATES, new int[]{GREEN, OFF}));
         s.setChecked(prefs.getBoolean(key, GuardService.def(key)));
+        final boolean[] confirmed = {false};
         s.setOnCheckedChangeListener((v, on) -> {
+            if (!on && guarded && !confirmed[0]) {
+                // Turning protection off needs the confirmation popup first.
+                confirmed[0] = true;
+                s.setChecked(true);
+                confirmed[0] = false;
+                confirmOff(label, () -> {
+                    confirmed[0] = true;
+                    s.setChecked(false);
+                    confirmed[0] = false;
+                });
+                return;
+            }
+            if (on == prefs.getBoolean(key, GuardService.def(key))) return;
             prefs.edit().putBoolean(key, on).apply();
             if (extra != null) extra.set(on);
         });
@@ -202,6 +225,96 @@ public final class MainActivity extends Activity {
         row.setOnClickListener(v -> s.toggle());
         if (out != null) out[0] = s;
         return row;
+    }
+
+    /** Popup before a switch is turned off: wait 10 s AND type the phrase, then "Kapat" unlocks. */
+    private void confirmOff(String label, final Runnable onConfirm) {
+        final Dialog dlg = new Dialog(this);
+        dlg.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setGravity(Gravity.CENTER_HORIZONTAL);
+        card.setPadding(dp(24), dp(24), dp(24), dp(20));
+        card.setBackground(round(0xFF282828, 20));
+
+        card.addView(text("Kapatmak istediğine emin misin?", 20, WHITE, true));
+        TextView what = text(label, 14, GREY, false);
+        what.setGravity(Gravity.CENTER);
+        what.setPadding(0, dp(6), 0, dp(12));
+        card.addView(what);
+
+        final TextView count = text(String.valueOf(CONFIRM_SEC), 44, GREEN, true);
+        card.addView(count);
+
+        TextView hint = text("Devam etmek için \"" + CONFIRM_PHRASE + "\" yaz", 14, GREY, false);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, dp(12), 0, dp(8));
+        card.addView(hint);
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        input.setHint(CONFIRM_PHRASE);
+        input.setHintTextColor(OFF);
+        input.setTextColor(WHITE);
+        input.setTextSize(16);
+        input.setBackground(round(FIELD, 8));
+        input.setPadding(dp(12), dp(10), dp(12), dp(10));
+        card.addView(input, new LinearLayout.LayoutParams(MATCH, WRAP));
+
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setGravity(Gravity.CENTER);
+        buttons.setPadding(0, dp(20), 0, 0);
+        Button cancel = pill("Vazgeç", true);
+        final Button ok = pill("Kapat", false);
+        ok.setEnabled(false);
+        ok.setAlpha(0.35f);
+        buttons.addView(cancel, new LinearLayout.LayoutParams(WRAP, dp(44)));
+        LinearLayout.LayoutParams ol = new LinearLayout.LayoutParams(WRAP, dp(44));
+        ol.leftMargin = dp(12);
+        buttons.addView(ok, ol);
+        card.addView(buttons);
+
+        final boolean[] waited = {false};
+        final Runnable update = () -> {
+            boolean typed = input.getText().toString().trim().equalsIgnoreCase(CONFIRM_PHRASE);
+            boolean ready = waited[0] && typed;
+            ok.setEnabled(ready);
+            ok.setAlpha(ready ? 1f : 0.35f);
+        };
+        final CountDownTimer timer = new CountDownTimer(CONFIRM_SEC * 1000L, 250) {
+            @Override public void onTick(long left) {
+                count.setText(String.valueOf((left + 999) / 1000));
+            }
+            @Override public void onFinish() {
+                count.setText("0");
+                count.setTextColor(GREY);
+                waited[0] = true;
+                update.run();
+            }
+        };
+        input.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) { update.run(); }
+        });
+        cancel.setOnClickListener(v -> dlg.dismiss());
+        ok.setOnClickListener(v -> {
+            dlg.dismiss();
+            onConfirm.run();
+        });
+        dlg.setOnDismissListener(d -> timer.cancel());
+
+        dlg.setContentView(card);
+        Window w = dlg.getWindow();
+        if (w != null) {
+            w.setBackgroundDrawable(new ColorDrawable(0));
+            w.setLayout(dp(320), WRAP);
+            w.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        dlg.show();
+        timer.start();
     }
 
     /** Numeric field; saved as soon as the value is inside [min, max]. */
