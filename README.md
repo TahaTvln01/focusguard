@@ -8,7 +8,9 @@ Instagram ve YouTube'daki bağımlılık yapan akışları engelleyen, zorunlu m
 2. Dosyayı aç → "Bilinmeyen uygulamaları yükle" iznini ver → **Yükle**.
 3. Android 13+: Ayarlar → Uygulamalar → FocusGuard → ⋮ → **Kısıtlanmış ayarlara izin ver**.
 4. FocusGuard'ı aç → **Erişilebilirlik ayarlarını aç** → Yüklü uygulamalar → FocusGuard → Aç.
-5. Anahtarları ve mola sürelerini istediğin gibi ayarla.
+5. Anahtarları ve mola sürelerini istediğin gibi ayarla. Mola açıkken ekrandaki sayaç sürüklenerek taşınır.
+
+Bir özellik çalışmıyorsa uygulamadaki **Tanılama kaydı al** ile ekran yapısını kaydedip issue'ya ekleyebilirsin (yazılar kısaltılır; paylaşmadan önce göz at).
 
 ## Kaldırma
 Ayarlar → Uygulamalar → FocusGuard → Kaldır.

@@ -1,6 +1,8 @@
 package app.focusguard;
 
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -22,17 +24,19 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
+import android.widget.Toast;
 
 public final class MainActivity extends Activity {
 
     private static final int BG = 0xFF121212, CARD = 0xFF181818, FIELD = 0xFF2A2A2A,
-            GREEN = 0xFF1DB954, WHITE = 0xFFFFFFFF, GREY = 0xFFB3B3B3, OFF = 0xFF535353, BLACK = 0xFF000000;
+            GREEN = 0xFF1DB954, WHITE = 0xFFFFFFFF, GREY = 0xFFB3B3B3, OFF = 0xFF535353, LINE = 0xFF333333, BLACK = 0xFF000000;
     private static final int[][] STATES = {{android.R.attr.state_checked}, {}};
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT, WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
 
     private SharedPreferences prefs;
     private float d;
     private TextView status;
+    private Button copy;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -50,15 +54,7 @@ public final class MainActivity extends Activity {
         status.setPadding(0, dp(4), 0, dp(16));
         box.addView(status);
 
-        Button open = new Button(this);
-        open.setText("Erişilebilirlik ayarlarını aç");
-        open.setAllCaps(false);
-        open.setTextColor(BLACK);
-        open.setTextSize(15);
-        open.setTypeface(Typeface.DEFAULT_BOLD);
-        open.setBackground(round(GREEN, 999));
-        open.setStateListAnimator(null);
-        open.setPadding(dp(28), 0, dp(28), 0);
+        Button open = pill("Erişilebilirlik ayarlarını aç", true);
         open.setOnClickListener(v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
@@ -77,6 +73,29 @@ public final class MainActivity extends Activity {
                 {"yt_ads", "Atlanabilir reklamları otomatik atla"},
         }));
 
+        TextView diag = text("Tanılama: bir özellik çalışmıyorsa düğmeye bas, 6 sn içinde Instagram/YouTube'da ilgili ekranı aç. "
+                + "Ekranın yapısı (düğme adları, kısaltılmış yazılar) yalnızca bu telefonda saklanır; kopyalayıp geliştiriciye gönderebilirsin.",
+                13, GREY, false);
+        diag.setPadding(0, dp(24), 0, dp(12));
+        box.addView(diag);
+        Button rec = pill("Tanılama kaydı al", false);
+        rec.setOnClickListener(v -> {
+            prefs.edit().putLong("dump_req", System.currentTimeMillis()).apply();
+            Toast.makeText(this, "6 sn içinde ilgili ekranı aç", Toast.LENGTH_SHORT).show();
+        });
+        box.addView(rec, new LinearLayout.LayoutParams(WRAP, dp(44)));
+        copy = pill("Kaydı kopyala", false);
+        copy.setOnClickListener(v -> {
+            try {
+                ((ClipboardManager) getSystemService(CLIPBOARD_SERVICE))
+                        .setPrimaryClip(ClipData.newPlainText("FocusGuard", prefs.getString("dump", "")));
+                Toast.makeText(this, "Kopyalandı", Toast.LENGTH_SHORT).show();
+            } catch (Throwable ignored) {}
+        });
+        LinearLayout.LayoutParams cl = new LinearLayout.LayoutParams(WRAP, dp(44));
+        cl.topMargin = dp(8);
+        box.addView(copy, cl);
+
         ScrollView sv = new ScrollView(this);
         sv.setFitsSystemWindows(true);
         sv.addView(box);
@@ -94,22 +113,25 @@ public final class MainActivity extends Activity {
         } catch (Throwable ignored) {}
         status.setText(enabled ? "● Aktif" : "● Kapalı — erişilebilirlik iznini açın");
         status.setTextColor(enabled ? GREEN : GREY);
+        copy.setVisibility(prefs.contains("dump") ? View.VISIBLE : View.GONE);
     }
 
-    /** One app: title + master switch, then its extra settings and forced-break settings. */
+    /** One app: title + master switch, a divider, then its extra settings and forced-break settings. */
     private View card(String title, String p, String[][] items) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
         c.setBackground(round(CARD, 12));
-        c.setPadding(dp(16), dp(8), dp(16), dp(12));
+        c.setPadding(dp(16), dp(6), dp(16), dp(12));
 
         final LinearLayout sub = new LinearLayout(this);
         sub.setOrientation(LinearLayout.VERTICAL);
         for (String[] it : items) sub.addView(toggle(it[1], it[0], 15, false, null));
 
-        final LinearLayout times = new LinearLayout(this);
+        final LinearLayout more = new LinearLayout(this);
+        more.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout times = new LinearLayout(this);
         times.setGravity(Gravity.CENTER_VERTICAL);
-        times.setPadding(0, 0, 0, dp(4));
+        times.setPadding(0, dp(4), 0, dp(8));
         times.addView(text("Her ", 15, GREY, false));
         times.addView(number(p + "_period_min", GuardService.DEF_PERIOD_MIN,
                 GuardService.MIN_PERIOD_MIN, GuardService.MAX_PERIOD_MIN));
@@ -117,21 +139,28 @@ public final class MainActivity extends Activity {
         times.addView(number(p + "_break_sec", GuardService.DEF_BREAK_SEC,
                 GuardService.MIN_BREAK_SEC, GuardService.MAX_BREAK_SEC));
         times.addView(text(" sn mola", 15, GREY, false));
+        more.addView(times);
+        more.addView(toggle("Ekranda sayaç göster (sürükleyerek taşınır)", p + "_counter", 15, false, null));
 
-        final Switch brk = toggle("Zorunlu mola", p + "_break", 15, false, on -> enable(times, on));
-        sub.addView(brk);
-        sub.addView(times);
-        enable(times, brk.isChecked());
+        final Switch[] brk = new Switch[1];
+        sub.addView(toggle("Zorunlu mola", p + "_break", 15, false, on -> enable(more, on), brk));
+        sub.addView(more);
 
-        Switch master = toggle(title, p, 22, true, on -> {
+        final Switch[] master = new Switch[1];
+        c.addView(toggle(title, p, 22, true, on -> {
             enable(sub, on);
-            if (on) enable(times, brk.isChecked());
-        });
-        enable(sub, master.isChecked());
-        if (master.isChecked()) enable(times, brk.isChecked());
+            if (on) enable(more, brk[0].isChecked());
+        }, master));
+        enable(sub, master[0].isChecked());
+        if (master[0].isChecked()) enable(more, brk[0].isChecked());
 
-        c.addView(master);
+        View line = new View(this);
+        line.setBackgroundColor(LINE);
+        LinearLayout.LayoutParams ll = new LinearLayout.LayoutParams(MATCH, Math.max(1, dp(1)));
+        ll.bottomMargin = dp(4);
+        c.addView(line, ll);
         c.addView(sub);
+
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(MATCH, WRAP);
         lp.topMargin = dp(16);
         c.setLayoutParams(lp);
@@ -140,13 +169,28 @@ public final class MainActivity extends Activity {
 
     private interface OnToggle { void set(boolean on); }
 
-    private Switch toggle(String label, final String key, int sp, boolean bold, final OnToggle extra) {
-        Switch s = new Switch(this);
-        s.setText(label);
-        s.setTextColor(WHITE);
-        s.setTextSize(sp);
-        if (bold) s.setTypeface(Typeface.DEFAULT_BOLD);
-        s.setPadding(0, dp(12), 0, dp(12));
+    private View toggle(String label, String key, int sp, boolean bold, OnToggle extra) {
+        return toggle(label, key, sp, bold, extra, null);
+    }
+
+    /** Row: label | short vertical bar | switch (the bar is shorter than the row, so bars never join). */
+    private View toggle(String label, final String key, int sp, boolean bold, final OnToggle extra, Switch[] out) {
+        LinearLayout row = new LinearLayout(this);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setMinimumHeight(dp(52));
+
+        TextView t = text(label, sp, WHITE, bold);
+        t.setPadding(0, dp(8), 0, dp(8));
+        row.addView(t, new LinearLayout.LayoutParams(0, WRAP, 1f));
+
+        View bar = new View(this);
+        bar.setBackgroundColor(OFF);
+        LinearLayout.LayoutParams bl = new LinearLayout.LayoutParams(Math.max(1, dp(1)), dp(22));
+        bl.leftMargin = dp(12);
+        bl.rightMargin = dp(12);
+        row.addView(bar, bl);
+
+        final Switch s = new Switch(this);
         s.setThumbTintList(new ColorStateList(STATES, new int[]{WHITE, GREY}));
         s.setTrackTintList(new ColorStateList(STATES, new int[]{GREEN, OFF}));
         s.setChecked(prefs.getBoolean(key, GuardService.def(key)));
@@ -154,7 +198,10 @@ public final class MainActivity extends Activity {
             prefs.edit().putBoolean(key, on).apply();
             if (extra != null) extra.set(on);
         });
-        return s;
+        row.addView(s);
+        row.setOnClickListener(v -> s.toggle());
+        if (out != null) out[0] = s;
+        return row;
     }
 
     /** Numeric field; saved as soon as the value is inside [min, max]. */
@@ -188,19 +235,31 @@ public final class MainActivity extends Activity {
     }
 
     /** Enables/disables a whole group and dims it when disabled. */
-    private void enable(View v, boolean on) {
+    private void enable(ViewGroup g, boolean on) {
+        g.setAlpha(on ? 1f : 0.35f);
+        enableAll(g, on);
+    }
+
+    private void enableAll(View v, boolean on) {
         v.setEnabled(on);
         if (!(v instanceof ViewGroup)) return;
         ViewGroup g = (ViewGroup) v;
-        g.setAlpha(on ? 1f : 0.35f);
-        for (int i = 0; i < g.getChildCount(); i++) {
-            View c = g.getChildAt(i);
-            if (c instanceof LinearLayout) enableAll((ViewGroup) c, on); else c.setEnabled(on);
-        }
+        for (int i = 0; i < g.getChildCount(); i++) enableAll(g.getChildAt(i), on);
     }
 
-    private void enableAll(ViewGroup g, boolean on) {
-        for (int i = 0; i < g.getChildCount(); i++) g.getChildAt(i).setEnabled(on);
+    private Button pill(String label, boolean filled) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(15);
+        b.setTypeface(Typeface.DEFAULT_BOLD);
+        b.setStateListAnimator(null);
+        b.setPadding(dp(28), 0, dp(28), 0);
+        GradientDrawable g = round(filled ? GREEN : 0, 999);
+        if (!filled) g.setStroke(Math.max(1, dp(1)), GREY);
+        b.setBackground(g);
+        b.setTextColor(filled ? BLACK : WHITE);
+        return b;
     }
 
     private TextView text(String s, int sp, int color, boolean bold) {
