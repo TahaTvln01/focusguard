@@ -33,6 +33,9 @@ final class Rules {
     /** Vertical pager of the Shorts player. */
     static final String[] YT_SHORTS_PAGER_ID = {"reel_recycler"};
 
+    /** "Skip ad" button of the video player. */
+    static final String[] YT_SKIP_AD_ID = {"skip_ad_button", "modern_skip_ad_text", "skip_ad_button_text"};
+
     /** Bottom-bar labels are only accepted below this fraction of the window height. */
     static final float BOTTOM_BAR_FROM = 0.80f;
 
