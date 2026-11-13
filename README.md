@@ -14,4 +14,4 @@ Instagram ve YouTube'daki bağımlılık yapan akışları engelleyen küçük b
 Ayarlar → Uygulamalar → FocusGuard → Kaldır.
 
 ## Sürüm çıkarma
-`git tag vX.Y.Z && git push origin vX.Y.Z` → Actions APK'yı derleyip Release'e ekler.
+`app/build.gradle` içinde `versionName`/`versionCode` artır, `main`e push et → Actions APK'yı derleyip yeni Release oluşturur.
