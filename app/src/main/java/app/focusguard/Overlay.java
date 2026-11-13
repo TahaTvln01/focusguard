@@ -36,6 +36,8 @@ final class Overlay {
     private TextView closer;
     private ValueAnimator snap;
     private View popup;
+    /** Called when the counter is tapped (not dragged). */
+    Runnable onTap;
 
     Overlay(Context c, SharedPreferences state) {
         ctx = c;
@@ -96,6 +98,17 @@ final class Overlay {
     }
 
     void popup(String app, long ms) {
+        long sec = (ms + 999) / 1000;
+        card("Mola vakti", app + " için " + (sec >= 120 ? Store.dur(ms) : sec + " sn")
+                + " mola.\nTelefonu kullanmaya devam edebilirsin.", "Tamam", Ui.AMBER, null, false);
+    }
+
+    /** Popup with an action button and "Vazgeç". */
+    void ask(String title, String message, String action, Runnable onAction) {
+        card(title, message, action, Ui.BLUE, onAction, true);
+    }
+
+    private void card(String title, String message, String action, int color, final Runnable onAction, boolean cancel) {
         dismissPopup();
         LinearLayout card = new LinearLayout(ctx);
         card.setOrientation(LinearLayout.VERTICAL);
@@ -103,18 +116,26 @@ final class Overlay {
         card.setPadding(Ui.dp(ctx, 28), Ui.dp(ctx, 24), Ui.dp(ctx, 28), Ui.dp(ctx, 20));
         card.setMinimumWidth(Ui.dp(ctx, 280));
         card.setBackground(Ui.round(ctx, Ui.SHEET, 20));
-        card.addView(Ui.text(ctx, "Mola vakti", 24, Ui.WHITE, true));
+        card.addView(Ui.text(ctx, title, 24, Ui.WHITE, true));
 
-        long sec = (ms + 999) / 1000;
-        TextView m = Ui.text(ctx, app + " için " + (sec >= 120 ? Store.dur(ms) : sec + " sn")
-                + " mola.\nTelefonu kullanmaya devam edebilirsin.", 15, Ui.GREY, false);
+        TextView m = Ui.text(ctx, message, 15, Ui.GREY, false);
         m.setGravity(Gravity.CENTER);
         m.setPadding(0, Ui.dp(ctx, 8), 0, Ui.dp(ctx, 20));
         card.addView(m);
 
-        Button ok = Ui.pill(ctx, "Tamam", Ui.AMBER);
-        ok.setOnClickListener(v -> dismissPopup());
+        Button ok = Ui.pill(ctx, action, color);
+        ok.setOnClickListener(v -> {
+            dismissPopup();
+            if (onAction != null) onAction.run();
+        });
         card.addView(ok, new LinearLayout.LayoutParams(WRAP, Ui.dp(ctx, 46)));
+        if (cancel) {
+            Button no = Ui.pill(ctx, "Vazgeç", 0);
+            no.setOnClickListener(v -> dismissPopup());
+            LinearLayout.LayoutParams nl = new LinearLayout.LayoutParams(WRAP, Ui.dp(ctx, 46));
+            nl.topMargin = Ui.dp(ctx, 10);
+            card.addView(no, nl);
+        }
 
         WindowManager.LayoutParams p = new WindowManager.LayoutParams(WRAP, WRAP,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -226,7 +247,10 @@ final class Overlay {
                     case MotionEvent.ACTION_UP:
                     case MotionEvent.ACTION_CANCEL:
                         removeCloser();
-                        if (!moved) return true;
+                        if (!moved) {
+                            if (e.getActionMasked() == MotionEvent.ACTION_UP && onTap != null) onTap.run();
+                            return true;
+                        }
                         if (overCloser()) {
                             dismissed = true;
                             removeDial();

@@ -19,7 +19,7 @@ final class Store {
 
     static final int DEF_PERIOD_MIN = 5, MAX_PERIOD_MIN = 600;
     static final int DEF_BREAK_SEC = 40, MIN_BREAK_SEC = 5, MAX_BREAK_SEC = 3600;
-    static final int DEF_FREE_BREAK_MIN = 5, MAX_FREE_BREAK_MIN = 600;
+    static final int DEF_FREE_SEC = 300, MIN_FREE_SEC = 10, MAX_FREE_MIN = 60;
     static final int DEF_FREE_DAILY_MIN = 30, MAX_FREE_DAILY_MIN = 1440;
     static final int MAX_GRANT_MIN = 10;
 
@@ -45,12 +45,19 @@ final class Store {
         return Math.max(1, m) * 60000L;
     }
 
-    static long freeBreakMs(SharedPreferences p) {
-        return clamp(p.getInt("free_break_min", DEF_FREE_BREAK_MIN), 0, MAX_FREE_BREAK_MIN) * 60000L;
+    /** Last chosen "give me N minutes" length, in seconds. */
+    static int freeSec(SharedPreferences p, String pfx) {
+        return clamp(p.getInt(pfx + "_free_sec", DEF_FREE_SEC), MIN_FREE_SEC, MAX_FREE_MIN * 60 + 59);
     }
 
-    static long freeDailyMs(SharedPreferences p) {
-        return clamp(p.getInt("free_daily_min", DEF_FREE_DAILY_MIN), 0, MAX_FREE_DAILY_MIN) * 60000L;
+    static long freeDailyMs(SharedPreferences p, String pfx) {
+        return clamp(p.getInt(pfx + "_free_daily_min", DEF_FREE_DAILY_MIN), 0, MAX_FREE_DAILY_MIN) * 60000L;
+    }
+
+    /** "5 dakika" / "5 dk 30 sn" / "45 saniye". */
+    static String freeLabel(int sec) {
+        int m = sec / 60, s = sec % 60;
+        return s == 0 ? m + " dakika" : m == 0 ? s + " saniye" : m + " dk " + s + " sn";
     }
 
     static int today() {
@@ -62,7 +69,8 @@ final class Store {
     static int roll(SharedPreferences st) {
         int t = today();
         if (st.getInt("day", 0) != t) {
-            st.edit().putInt("day", t).putLong("use_ig", 0).putLong("use_yt", 0).putLong("free_used", 0).apply();
+            st.edit().putInt("day", t).putLong("use_ig", 0).putLong("use_yt", 0)
+                    .putLong("free_used_ig", 0).putLong("free_used_yt", 0).apply();
         }
         return t;
     }

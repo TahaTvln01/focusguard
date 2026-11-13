@@ -18,7 +18,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
  * and uses a single one-shot timer for the next deadline (break, goal, free-mode end).
  *
  * Per app, in priority order:
- *   1. free mode  – everything allowed until it ends, then a forced break for all apps
+ *   1. free mode  – "give me N minutes": everything in that app is allowed until it ends
  *   2. break      – app is sent to the home screen
  *   3. daily goal – once exceeded the app opens only through GateActivity (typed phrase, max 10 min grants);
  *                   feed rules still apply, periodic breaks do not
@@ -39,7 +39,7 @@ public final class GuardService extends AccessibilityService {
     private boolean igReels, igSwipe, ytShorts, ytSwipe;
 
     // persisted state (wall-clock ms)
-    private long freeUntil, freeTotal, lockUntil;
+    private final long[] freeUntil = new long[2], freeTotal = new long[2];
     private final long[] grantUntil = new long[2], grantTotal = new long[2], usage = new long[2];
     private int day;
 
@@ -66,7 +66,7 @@ public final class GuardService extends AccessibilityService {
     };
     private final SharedPreferences.OnSharedPreferenceChangeListener onState = (p, k) -> {
         try {
-            if (k == null || !(k.startsWith("free_until") || k.startsWith("lock_") || k.startsWith("grant_"))) return;
+            if (k == null || !(k.startsWith("free_until") || k.startsWith("grant_"))) return;
             loadState();
             reevaluate();
         } catch (Throwable t) {
@@ -85,6 +85,7 @@ public final class GuardService extends AccessibilityService {
             prefs = getSharedPreferences(Store.SETTINGS, MODE_PRIVATE);
             st = getSharedPreferences(Store.STATE, MODE_PRIVATE);
             overlay = new Overlay(this, st);
+            overlay.onTap = () -> { try { offerEndFree(); } catch (Throwable t) { fail(); } };
             loadSettings();
             rollDay();
             loadState();
@@ -120,10 +121,9 @@ public final class GuardService extends AccessibilityService {
     }
 
     private void loadState() {
-        freeUntil = st.getLong("free_until", 0);
-        freeTotal = st.getLong("free_total", 0);
-        lockUntil = st.getLong("lock_until", 0);
         for (int a = 0; a < 2; a++) {
+            freeUntil[a] = st.getLong("free_until_" + Store.PFX[a], 0);
+            freeTotal[a] = st.getLong("free_total_" + Store.PFX[a], 0);
             grantUntil[a] = st.getLong("grant_" + Store.PFX[a], 0);
             grantTotal[a] = st.getLong("grant_total_" + Store.PFX[a], 0);
         }
@@ -266,14 +266,14 @@ public final class GuardService extends AccessibilityService {
 
     /** Decides what the foreground app may do right now, updates the counter and the next deadline. */
     private int gate(int a, long now) {
-        if (now < freeUntil) {
+        if (now < freeUntil[a]) {
             used[a] = 0;
             periodSince = now;
-            overlay.show(Ui.BLUE, freeUntil, freeTotal);
-            schedule(freeUntil, now);
+            overlay.show(Ui.BLUE, freeUntil[a], freeTotal[a]);
+            schedule(freeUntil[a], now);
             return ALLOW_ALL;
         }
-        long end = breakEnd(a);
+        long end = breakUntil[a];
         if (now < end) {
             kick(a, now, end);
             return BLOCK;
@@ -307,9 +307,20 @@ public final class GuardService extends AccessibilityService {
         return ALLOW;
     }
 
-    /** End of the break that currently blocks the app (0 = none). */
-    private long breakEnd(int a) {
-        return Math.max(breakUntil[a], lockUntil);
+    /** Counter tapped during free mode: offer to end it early (unused time goes back to today's budget). */
+    private void offerEndFree() {
+        final int a = fg;
+        if (a < 0 || System.currentTimeMillis() >= freeUntil[a]) return;
+        overlay.ask("Serbest mod açık", Store.NAME[a] + " için engeller kalktı.", "Serbest modu kapat", () -> {
+            try {
+                long now = System.currentTimeMillis(), left = Math.max(0, freeUntil[a] - now);
+                String p = Store.PFX[a];
+                st.edit().putLong("free_used_" + p, Math.max(0, st.getLong("free_used_" + p, 0) - left))
+                        .putLong("free_until_" + p, 0).apply();
+            } catch (Throwable t) {
+                fail();
+            }
+        });
     }
 
     /** Break: send the app to the home screen; the first time also explain with a popup. */
@@ -339,10 +350,10 @@ public final class GuardService extends AccessibilityService {
     private void idle(long now) {
         long end = 0, total = 0;
         for (int a = 0; a < 2; a++) {
-            long e = master[a] ? breakEnd(a) : 0;
+            long e = master[a] ? breakUntil[a] : 0;
             if (e > now && e > end) {
                 end = e;
-                total = e == lockUntil ? lockUntil - freeUntil : breakMs[a];
+                total = breakMs[a];
             }
         }
         if (end > 0) {

@@ -19,6 +19,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.NumberPicker;
 import android.widget.ScrollView;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -26,7 +27,7 @@ import android.widget.Toast;
 
 import java.util.Date;
 
-/** Single settings screen: free-mode button, then one card per app (switches, breaks, screen time, goal). */
+/** Single settings screen: one card per app (free-mode button, switches, breaks, screen time, goal). */
 public final class MainActivity extends Activity {
 
     private static final String CONFIRM_PHRASE = "Bunu gerçekten istiyorum";
@@ -35,9 +36,10 @@ public final class MainActivity extends Activity {
     private static final int MATCH = ViewGroup.LayoutParams.MATCH_PARENT, WRAP = ViewGroup.LayoutParams.WRAP_CONTENT;
 
     private SharedPreferences prefs, st;
-    private TextView status, freeInfo;
+    private TextView status;
     private Button open;
-    private final TextView[] usageText = new TextView[2];
+    private final TextView[] usageText = new TextView[2], freeInfo = new TextView[2];
+    private final Button[] freeBtn = new Button[2];
     private final View[] barFill = new View[2], barRest = new View[2];
 
     @Override
@@ -65,24 +67,6 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams ol = new LinearLayout.LayoutParams(WRAP, dp(48));
         ol.bottomMargin = dp(12);
         box.addView(open, ol);
-
-        // Free mode: "give me N minutes" + its settings behind the three dots.
-        LinearLayout free = new LinearLayout(this);
-        free.setGravity(Gravity.CENTER_VERTICAL);
-        Button give = Ui.pill(this, "Bana bi dakika ver", Ui.GREEN);
-        give.setOnClickListener(v -> askFree());
-        free.addView(give, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        Button more = Ui.pill(this, "⋮", 0);
-        more.setTextSize(20);
-        more.setPadding(0, 0, 0, 0);
-        more.setOnClickListener(v -> editFree());
-        LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(dp(48), dp(48));
-        ml.leftMargin = dp(8);
-        free.addView(more, ml);
-        box.addView(free);
-        freeInfo = Ui.text(this, "", 13, Ui.GREY, false);
-        freeInfo.setPadding(dp(4), dp(6), 0, 0);
-        box.addView(freeInfo);
 
         box.addView(card(0, new String[][]{
                 {"ig_reels", "Reels sekmesi → ana sayfa"},
@@ -130,15 +114,12 @@ public final class MainActivity extends Activity {
             ((LinearLayout.LayoutParams) barFill[a].getLayoutParams()).weight = f;
             ((LinearLayout.LayoutParams) barRest[a].getLayoutParams()).weight = 1f - f;
             barFill[a].requestLayout();
-        }
-        long freeUntil = st.getLong("free_until", 0), lockUntil = st.getLong("lock_until", 0);
-        if (now < freeUntil) {
-            freeInfo.setText("Serbest mod açık: " + clock(freeUntil) + "'e kadar tüm engeller kalktı");
-        } else if (now < lockUntil) {
-            freeInfo.setText("Serbest mod bitti: " + clock(lockUntil) + "'e kadar zorunlu mola");
-        } else {
-            freeInfo.setText("Bugün kalan: " + Store.dur(freeLeft()) + " · sonrasında "
-                    + Store.dur(Store.freeBreakMs(prefs)) + " zorunlu mola");
+
+            freeBtn[a].setText("Bana bi " + Store.freeLabel(Store.freeSec(prefs, p)) + " ver");
+            long until = st.getLong("free_until_" + p, 0);
+            freeInfo[a].setText(now < until
+                    ? "Serbest mod açık: " + clock(until) + "'e kadar engeller kalktı"
+                    : "Bugün kalan serbest süre: " + Store.dur(freeLeft(a)));
         }
     }
 
@@ -146,56 +127,78 @@ public final class MainActivity extends Activity {
         return DateFormat.getTimeFormat(this).format(new Date(at));
     }
 
-    private long freeLeft() {
-        return Math.max(0, Store.freeDailyMs(prefs) - st.getLong("free_used", 0));
+    private long freeLeft(int a) {
+        String p = Store.PFX[a];
+        return Math.max(0, Store.freeDailyMs(prefs, p) - st.getLong("free_used_" + p, 0));
     }
 
-    // ---- free mode ----
+    // ---- free mode ("give me N minutes"), per app ----
 
-    private void askFree() {
+    private void askFree(final int a) {
         Store.roll(st);
-        final long now = System.currentTimeMillis();
-        if (now < st.getLong("free_until", 0)) { toast("Serbest mod zaten açık"); return; }
-        if (now < st.getLong("lock_until", 0)) { toast("Önce zorunlu mola bitmeli"); return; }
-        final int max = (int) (freeLeft() / 60000);
-        if (max < 1) { toast("Bugünkü hakkın bitti"); return; }
+        final String p = Store.PFX[a];
+        if (System.currentTimeMillis() < st.getLong("free_until_" + p, 0)) { toast("Serbest mod zaten açık"); return; }
+        final long left = freeLeft(a);
+        if (left < Store.MIN_FREE_SEC * 1000L) { toast("Bugünkü hakkın bitti"); return; }
 
-        LinearLayout card = sheet("Kaç dakika istiyorsun?");
-        TextView info = Ui.text(this, "Bu sürede tüm engeller kalkar. Bugün en fazla " + max + " dk.", 14, Ui.GREY, false);
+        LinearLayout card = sheet("Ne kadar süre?");
+        TextView info = Ui.text(this, Store.NAME[a] + "'da bu sürede tüm engeller kalkar.\nBugün kalan: " + Store.dur(left),
+                14, Ui.GREY, false);
         info.setGravity(Gravity.CENTER);
-        info.setPadding(0, dp(6), 0, dp(14));
+        info.setPadding(0, dp(6), 0, dp(8));
         card.addView(info);
-        final EditText mins = Ui.field(this, "1-" + max, true, 4);
-        card.addView(mins, new LinearLayout.LayoutParams(dp(96), WRAP));
+
+        int last = (int) Math.min(Store.freeSec(prefs, p), left / 1000);
+        final NumberPicker min = wheel(0, (int) Math.min(Store.MAX_FREE_MIN, left / 60000), last / 60);
+        final NumberPicker sec = wheel(0, 59, last % 60);
+        LinearLayout wheels = new LinearLayout(this);
+        wheels.setGravity(Gravity.CENTER);
+        wheels.addView(min);
+        wheels.addView(Ui.text(this, " dk   ", 16, Ui.GREY, false));
+        wheels.addView(sec);
+        wheels.addView(Ui.text(this, " sn", 16, Ui.GREY, false));
+        card.addView(wheels);
+
         final Dialog dlg = dialog(card);
         final Button ok = buttons(card, dlg, "Başlat");
-        Ui.able(ok, false);
-        mins.addTextChangedListener(new GateActivity.Watch(() -> {
-            int m = Ui.num(mins);
-            Ui.able(ok, m >= 1 && m <= max);
-        }));
+        final Runnable check = () -> {
+            long ms = (min.getValue() * 60L + sec.getValue()) * 1000;
+            Ui.able(ok, ms >= Store.MIN_FREE_SEC * 1000L && ms <= left);
+        };
+        min.setOnValueChangedListener((v, o, n) -> check.run());
+        sec.setOnValueChangedListener((v, o, n) -> check.run());
+        check.run();
         ok.setOnClickListener(v -> {
-            int m = Ui.num(mins);
-            if (m < 1 || m > max) return;
-            long ms = m * 60000L, t = System.currentTimeMillis();
-            st.edit().putLong("free_used", st.getLong("free_used", 0) + ms)
-                    .putLong("free_total", ms)
-                    .putLong("lock_until", t + ms + Store.freeBreakMs(prefs))
-                    .putLong("free_until", t + ms).apply();
+            int total = min.getValue() * 60 + sec.getValue();
+            long ms = total * 1000L;
+            if (ms < Store.MIN_FREE_SEC * 1000L || ms > left) return;
+            prefs.edit().putInt(p + "_free_sec", total).apply();
+            st.edit().putLong("free_used_" + p, st.getLong("free_used_" + p, 0) + ms)
+                    .putLong("free_total_" + p, ms)
+                    .putLong("free_until_" + p, System.currentTimeMillis() + ms).apply();
             dlg.dismiss();
             refresh();
         });
         dlg.show();
     }
 
-    private void editFree() {
-        LinearLayout card = sheet("Serbest mod ayarları");
-        int daily = (int) (Store.freeDailyMs(prefs) / 60000);
+    /** Scroll wheel, like the system timer pickers. */
+    private NumberPicker wheel(int min, int max, int value) {
+        NumberPicker n = new NumberPicker(this);
+        n.setMinValue(min);
+        n.setMaxValue(Math.max(min, max));
+        n.setValue(Store.clamp(value, min, Math.max(min, max)));
+        n.setWrapSelectorWheel(max - min >= 3);
+        n.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS); // scroll only, no keyboard
+        n.setTextColor(Ui.WHITE);
+        n.setFormatter(v -> v < 10 ? "0" + v : String.valueOf(v));
+        return n;
+    }
 
-        final EditText brk = Ui.field(this, "0-" + Store.MAX_FREE_BREAK_MIN, true, 3);
-        brk.setText(String.valueOf(Store.freeBreakMs(prefs) / 60000));
-        card.addView(line("Bitince zorunlu mola", brk, "dk", null, null));
-
+    private void editFree(final int a) {
+        final String p = Store.PFX[a];
+        LinearLayout card = sheet(Store.NAME[a] + " serbest süre");
+        int daily = (int) (Store.freeDailyMs(prefs, p) / 60000);
         final EditText h = Ui.field(this, "0-24", true, 2), m = Ui.field(this, "0-59", true, 2);
         h.setText(String.valueOf(daily / 60));
         m.setText(String.valueOf(daily % 60));
@@ -204,13 +207,12 @@ public final class MainActivity extends Activity {
         final Dialog dlg = dialog(card);
         Button ok = buttons(card, dlg, "Kaydet");
         ok.setOnClickListener(v -> {
-            int b = Ui.num(brk), hh = Ui.num(h), mm = Ui.num(m);
-            if (b < 0 || b > Store.MAX_FREE_BREAK_MIN || hh < 0 || mm < 0 || mm > 59
-                    || hh * 60 + mm > Store.MAX_FREE_DAILY_MIN) {
+            int hh = Ui.num(h), mm = Ui.num(m);
+            if (hh < 0 || mm < 0 || mm > 59 || hh * 60 + mm > Store.MAX_FREE_DAILY_MIN) {
                 toast("Geçersiz değer");
                 return;
             }
-            prefs.edit().putInt("free_break_min", b).putInt("free_daily_min", hh * 60 + mm).apply();
+            prefs.edit().putInt(p + "_free_daily_min", hh * 60 + mm).apply();
             dlg.dismiss();
             refresh();
         });
@@ -241,6 +243,25 @@ public final class MainActivity extends Activity {
             }
             refresh();
         };
+
+        // "Give me N minutes" + its daily limit behind the three dots.
+        LinearLayout free = new LinearLayout(this);
+        free.setGravity(Gravity.CENTER_VERTICAL);
+        free.setPadding(0, dp(10), 0, 0);
+        freeBtn[a] = Ui.pill(this, "", Ui.GREEN);
+        freeBtn[a].setOnClickListener(v -> askFree(a));
+        free.addView(freeBtn[a], new LinearLayout.LayoutParams(0, dp(46), 1f));
+        Button more = Ui.pill(this, "⋮", 0);
+        more.setTextSize(20);
+        more.setPadding(0, 0, 0, 0);
+        more.setOnClickListener(v -> editFree(a));
+        LinearLayout.LayoutParams ml = new LinearLayout.LayoutParams(dp(46), dp(46));
+        ml.leftMargin = dp(8);
+        free.addView(more, ml);
+        sub.addView(free);
+        freeInfo[a] = Ui.text(this, "", 13, Ui.GREY, false);
+        freeInfo[a].setPadding(dp(4), dp(6), 0, dp(6));
+        sub.addView(freeInfo[a]);
 
         for (String[] it : items) sub.addView(toggle(it[1], it[0], null, 15, null, null));
 

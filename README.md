@@ -14,7 +14,7 @@ Instagram ve YouTube'daki bağımlılık yapan akışları engelleyen, zorunlu m
 - Reels / Shorts sekmesini kapatma, açılan videodan sonrakine kaydırmayı engelleme.
 - Zorunlu mola: her X dk kullanımda Y sn mola; ekranda yuvarlak sayaç (kenara yapışır, alta sürükleyince gizlenir).
 - Günlük ekran süresi ve hedef: hedef aşılınca uygulama yalnızca onay cümlesiyle, en fazla 10 dk'lık izinlerle açılır.
-- "Bana bi dakika ver": günlük bütçe içinde tüm engelleri geçici kaldırır, bitince zorunlu mola.
+- "Bana bi 5 dakika ver": uygulama başına, günlük bütçe içinde o uygulamadaki tüm engelleri geçici kaldırır; sayaca dokunup erken kapatılabilir.
 - Bir korumayı kapatmak 10 sn bekleme + onay cümlesi ister.
 
 ## Kaldırma
