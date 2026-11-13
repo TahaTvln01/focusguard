@@ -1,13 +1,19 @@
 package app.focusguard;
 
 import android.animation.ValueAnimator;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.Typeface;
+import android.os.Build;
+import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -38,6 +44,12 @@ final class Overlay {
     private View popup;
     /** Called when the counter is tapped (not dragged). */
     Runnable onTap;
+    /** Setting: show a countdown notification while the counter is hidden. */
+    boolean notifyHidden;
+    private static final String CHANNEL = "timer";
+    private static final int NOTE_ID = 1;
+    private boolean noted;
+    private long notedEnd;
 
     Overlay(Context c, SharedPreferences state) {
         ctx = c;
@@ -49,7 +61,10 @@ final class Overlay {
 
     /** Shows/updates the counter running down to endAt (System.currentTimeMillis). */
     void show(int color, long endAt, long total) {
-        if (dismissed) return;
+        if (dismissed) {
+            if (endAt != notedEnd) notifyTimer(color, endAt);
+            return;
+        }
         if (dial != null && !hiding && dial.target == color && Math.abs(dial.endAt - endAt) < 100) return;
         if (dial == null) {
             dial = new Dial(ctx);
@@ -77,6 +92,7 @@ final class Overlay {
     }
 
     void hide() {
+        cancelNote();
         if (dial == null || hiding) return;
         hiding = true;
         final Dial v = dial;
@@ -88,6 +104,46 @@ final class Overlay {
     /** The user hid the counter by dragging it down; call when the app is opened again. */
     void restore() {
         dismissed = false;
+        cancelNote();
+    }
+
+    // ---- optional status-bar countdown while the counter is hidden ----
+
+    private void notifyTimer(int color, long endAt) {
+        notedEnd = endAt;
+        try {
+            if (!notifyHidden) return;
+            if (Build.VERSION.SDK_INT >= 33 && ctx.checkSelfPermission("android.permission.POST_NOTIFICATIONS")
+                    != PackageManager.PERMISSION_GRANTED) return;
+            NotificationManager nm = ctx.getSystemService(NotificationManager.class);
+            nm.createNotificationChannel(new NotificationChannel(CHANNEL, "Sayaç", NotificationManager.IMPORTANCE_LOW));
+            String title = color == Ui.AMBER ? "Mola" : color == Ui.BLUE ? "Serbest mod"
+                    : color == Ui.RED ? "Ek süre" : "Sıradaki molaya";
+            Bundle extras = new Bundle();
+            extras.putBoolean("android.requestPromotedOngoing", true); // Android 16+: live chip in the status bar
+            nm.notify(NOTE_ID, new Notification.Builder(ctx, CHANNEL)
+                    .setSmallIcon(R.drawable.ic_mono)
+                    .setContentTitle(title)
+                    .setContentText("FocusGuard")
+                    .setColor(color)
+                    .setWhen(endAt)
+                    .setShowWhen(true)
+                    .setUsesChronometer(true)
+                    .setChronometerCountDown(true)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .setTimeoutAfter(Math.max(1000, endAt - System.currentTimeMillis()))
+                    .addExtras(extras)
+                    .build());
+            noted = true;
+        } catch (Throwable ignored) {}
+    }
+
+    private void cancelNote() {
+        notedEnd = 0;
+        if (!noted) return;
+        noted = false;
+        try { ctx.getSystemService(NotificationManager.class).cancel(NOTE_ID); } catch (Throwable ignored) {}
     }
 
     /** Small bump to say "still on a break". */
@@ -101,6 +157,10 @@ final class Overlay {
         long sec = (ms + 999) / 1000;
         card("Mola vakti", app + " için " + (sec >= 120 ? Store.dur(ms) : sec + " sn")
                 + " mola.\nTelefonu kullanmaya devam edebilirsin.", "Tamam", Ui.AMBER, null, false);
+    }
+
+    void info(String title, String message) {
+        card(title, message, "Tamam", Ui.BLUE, null, false);
     }
 
     /** Popup with an action button and "Vazgeç". */
@@ -159,6 +219,7 @@ final class Overlay {
     }
 
     void destroy() {
+        cancelNote();
         dismissPopup();
         removeCloser();
         removeDial();
@@ -253,6 +314,7 @@ final class Overlay {
                         }
                         if (overCloser()) {
                             dismissed = true;
+                            if (dial != null) notifyTimer(dial.target, dial.endAt);
                             removeDial();
                         } else {
                             snapToEdge();

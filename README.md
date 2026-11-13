@@ -12,10 +12,12 @@ Instagram ve YouTube'daki bağımlılık yapan akışları engelleyen, zorunlu m
 
 ## Özellikler
 - Reels / Shorts sekmesini kapatma, açılan videodan sonrakine kaydırmayı engelleme.
-- Zorunlu mola: her X dk kullanımda Y sn mola; ekranda yuvarlak sayaç (kenara yapışır, alta sürükleyince gizlenir).
-- Günlük ekran süresi ve hedef: hedef aşılınca uygulama yalnızca onay cümlesiyle, en fazla 10 dk'lık izinlerle açılır.
-- "Bana bi 5 dakika ver": uygulama başına, günlük bütçe içinde o uygulamadaki tüm engelleri geçici kaldırır; sayaca dokunup erken kapatılabilir.
+- Zorunlu mola: her X kullanımda Y mola; ekranda yuvarlak sayaç (kenara yapışır, alta sürükleyince gizlenir).
+- Günlük ekran süresi halkası ve hedef: hedef aşılınca uygulama yalnızca onay cümlesiyle, en fazla 10 dk'lık izinlerle açılır.
+- "Bana bi 5 dakika ver": uygulama başına, günlük bütçe içinde o uygulamadaki tüm engelleri geçici kaldırır; istediğin an çıkabilirsin.
+- Süreler kaydırmalı tekerleklerle seçilir; her ayarın yanındaki ? ne işe yaradığını anlatır.
 - Bir korumayı kapatmak 10 sn bekleme + onay cümlesi ister.
+- İsteğe bağlı: gizlenen sayaç bildirim olarak geri sayar (yalnızca bu seçenek açılırsa bildirim izni istenir).
 
 ## Kaldırma
 Ayarlar → Uygulamalar → FocusGuard → Kaldır.

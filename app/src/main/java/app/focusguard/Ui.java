@@ -54,7 +54,7 @@ final class Ui {
         if (fill == 0) g.setStroke(Math.max(1, dp(c, 1)), GREY);
         b.setBackground(g);
         b.setTextColor(fill == 0 ? WHITE : BLACK);
-        return b;
+        return press(b);
     }
 
     static EditText field(Context c, String hint, boolean number, int maxLen) {
@@ -75,6 +75,40 @@ final class Ui {
         e.setBackground(round(c, FIELD, 8));
         e.setPadding(dp(c, 10), dp(c, 7), dp(c, 10), dp(c, 7));
         return e;
+    }
+
+    /** Small press-down animation for anything tappable. */
+    static <T extends View> T press(final T v) {
+        v.setOnTouchListener((x, e) -> {
+            int a = e.getActionMasked();
+            if (a == android.view.MotionEvent.ACTION_DOWN) v.animate().scaleX(0.95f).scaleY(0.95f).setDuration(80);
+            else if (a == android.view.MotionEvent.ACTION_UP || a == android.view.MotionEvent.ACTION_CANCEL)
+                v.animate().scaleX(1f).scaleY(1f).setDuration(140);
+            return false;
+        });
+        return v;
+    }
+
+    /** Small tappable value chip (opens a wheel picker). */
+    static Button chip(Context c, String label) {
+        Button b = pill(c, label, FIELD);
+        b.setTextColor(WHITE);
+        b.setPadding(dp(c, 14), 0, dp(c, 14), 0);
+        return b;
+    }
+
+    /** Scroll wheel, like the system timer pickers. */
+    static android.widget.NumberPicker wheel(Context c, int min, int max, int value) {
+        android.widget.NumberPicker n = new android.widget.NumberPicker(c);
+        max = Math.max(min, max);
+        n.setMinValue(min);
+        n.setMaxValue(max);
+        n.setValue(Math.max(min, Math.min(max, value)));
+        n.setWrapSelectorWheel(max - min >= 3);
+        n.setDescendantFocusability(android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS); // scroll only, no keyboard
+        n.setTextColor(WHITE);
+        n.setFormatter(v -> v < 10 ? "0" + v : String.valueOf(v));
+        return n;
     }
 
     static void able(View v, boolean on) {

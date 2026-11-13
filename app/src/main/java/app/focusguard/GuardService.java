@@ -39,7 +39,7 @@ public final class GuardService extends AccessibilityService {
     private boolean igReels, igSwipe, ytShorts, ytSwipe;
 
     // persisted state (wall-clock ms)
-    private final long[] freeUntil = new long[2], freeTotal = new long[2];
+    private final long[] freeUntil = new long[2], freeTotal = new long[2], freeNoted = new long[2];
     private final long[] grantUntil = new long[2], grantTotal = new long[2], usage = new long[2];
     private int day;
 
@@ -114,6 +114,7 @@ public final class GuardService extends AccessibilityService {
             breakMs[a] = Store.breakMs(prefs, p);
             goalMs[a] = Store.goalMs(prefs, p);
         }
+        if (overlay != null) overlay.notifyHidden = prefs.getBoolean("notify_hidden", false);
         igReels = b("ig_reels");
         igSwipe = b("ig_swipe");
         ytShorts = b("yt_shorts");
@@ -273,6 +274,12 @@ public final class GuardService extends AccessibilityService {
             schedule(freeUntil[a], now);
             return ALLOW_ALL;
         }
+        if (freeUntil[a] != 0 && freeNoted[a] != freeUntil[a]) { // free mode just ran out: say so, keep the app open
+            freeNoted[a] = freeUntil[a];
+            if (now - freeUntil[a] < 5000) {
+                overlay.info("Serbest mod bitti", Store.NAME[a] + " için normal kurallar geri geldi.");
+            }
+        }
         long end = breakUntil[a];
         if (now < end) {
             kick(a, now, end);
@@ -313,10 +320,7 @@ public final class GuardService extends AccessibilityService {
         if (a < 0 || System.currentTimeMillis() >= freeUntil[a]) return;
         overlay.ask("Serbest mod açık", Store.NAME[a] + " için engeller kalktı.", "Serbest modu kapat", () -> {
             try {
-                long now = System.currentTimeMillis(), left = Math.max(0, freeUntil[a] - now);
-                String p = Store.PFX[a];
-                st.edit().putLong("free_used_" + p, Math.max(0, st.getLong("free_used_" + p, 0) - left))
-                        .putLong("free_until_" + p, 0).apply();
+                Store.endFree(st, Store.PFX[a]);
             } catch (Throwable t) {
                 fail();
             }

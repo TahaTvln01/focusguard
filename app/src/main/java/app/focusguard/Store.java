@@ -60,6 +60,19 @@ final class Store {
         return s == 0 ? m + " dakika" : m == 0 ? s + " saniye" : m + " dk " + s + " sn";
     }
 
+    /** Ends free mode now; the unused part goes back to today's budget. */
+    static void endFree(SharedPreferences st, String pfx) {
+        long left = Math.max(0, st.getLong("free_until_" + pfx, 0) - System.currentTimeMillis());
+        st.edit().putLong("free_used_" + pfx, Math.max(0, st.getLong("free_used_" + pfx, 0) - left))
+                .putLong("free_until_" + pfx, 0).apply();
+    }
+
+    /** "1 sa 5 dk" / "40 sn" for a value made of big*60+small units. */
+    static String span(int total, String big, String small) {
+        int a = total / 60, b = total % 60;
+        return a == 0 ? b + " " + small : b == 0 ? a + " " + big : a + " " + big + " " + b + " " + small;
+    }
+
     static int today() {
         Calendar c = Calendar.getInstance();
         return c.get(Calendar.YEAR) * 10000 + (c.get(Calendar.MONTH) + 1) * 100 + c.get(Calendar.DAY_OF_MONTH);

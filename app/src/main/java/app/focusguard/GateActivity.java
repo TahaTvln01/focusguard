@@ -13,7 +13,9 @@ import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.EditText;
+import android.view.inputmethod.InputMethodManager;
 import android.widget.LinearLayout;
+import android.widget.NumberPicker;
 import android.widget.TextView;
 
 /** Shown over an app whose daily goal is exceeded: type the phrase, then ask for up to 10 minutes. */
@@ -79,10 +81,13 @@ public final class GateActivity extends Activity {
         TextView h2 = Ui.text(this, "Kaç dakika istiyorsun? (en fazla " + Store.MAX_GRANT_MIN + ")", 14, Ui.GREY, false);
         h2.setPadding(0, 0, 0, Ui.dp(this, 10));
         two.addView(h2);
-        final EditText mins = Ui.field(this, "1-" + Store.MAX_GRANT_MIN, true, 2);
-        two.addView(mins, new LinearLayout.LayoutParams(Ui.dp(this, 96), WRAP));
+        final NumberPicker mins = Ui.wheel(this, 1, Store.MAX_GRANT_MIN, 5);
+        LinearLayout wheelRow = new LinearLayout(this);
+        wheelRow.setGravity(Gravity.CENTER);
+        wheelRow.addView(mins);
+        wheelRow.addView(Ui.text(this, "  dk", 16, Ui.GREY, false));
+        two.addView(wheelRow);
         final Button ok = Ui.pill(this, "İzin ver", Ui.GREEN);
-        Ui.able(ok, false);
         two.addView(ok, top(20));
         box.addView(two, new LinearLayout.LayoutParams(MATCH, WRAP));
 
@@ -93,16 +98,17 @@ public final class GateActivity extends Activity {
         phrase.addTextChangedListener(new Watch(() ->
                 Ui.able(next, phrase.getText().toString().trim().equalsIgnoreCase(PHRASE))));
         next.setOnClickListener(v -> {
-            one.setVisibility(View.GONE);
-            two.setVisibility(View.VISIBLE);
-            mins.requestFocus();
+            // Hide the keyboard and cross-fade to the second step.
+            ((InputMethodManager) getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(phrase.getWindowToken(), 0);
+            one.animate().alpha(0f).setDuration(150).withEndAction(() -> {
+                one.setVisibility(View.GONE);
+                two.setAlpha(0f);
+                two.setVisibility(View.VISIBLE);
+                two.animate().alpha(1f).setDuration(200);
+            });
         });
-        mins.addTextChangedListener(new Watch(() -> {
-            int m = Ui.num(mins);
-            Ui.able(ok, m >= 1 && m <= Store.MAX_GRANT_MIN);
-        }));
         ok.setOnClickListener(v -> {
-            int m = Ui.num(mins);
+            int m = mins.getValue();
             if (m < 1 || m > Store.MAX_GRANT_MIN) return;
             long ms = m * 60000L;
             st.edit().putLong("grant_total_" + p, ms).putLong("grant_" + p, System.currentTimeMillis() + ms).apply();
@@ -110,6 +116,9 @@ public final class GateActivity extends Activity {
         });
 
         setContentView(box);
+        box.setAlpha(0f);
+        box.setTranslationY(Ui.dp(this, 24));
+        box.animate().alpha(1f).translationY(0f).setDuration(250);
     }
 
     private LinearLayout.LayoutParams top(int marginDp) {
