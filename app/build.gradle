@@ -1,0 +1,32 @@
+plugins { id 'com.android.application' }
+
+android {
+    namespace 'app.focusguard'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'app.focusguard'
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName '1.0.0'
+    }
+    signingConfigs {
+        release {
+            storeFile rootProject.file('focusguard.jks')
+            storePassword 'focusguard'
+            keyAlias 'focusguard'
+            keyPassword 'focusguard'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+    lint { checkReleaseBuilds false }
+}
