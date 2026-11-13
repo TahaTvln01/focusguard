@@ -10,120 +10,138 @@ import android.content.SharedPreferences;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
-import android.os.SystemClock;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import android.widget.Toast;
 
-public final class GuardService extends AccessibilityService
-        implements SharedPreferences.OnSharedPreferenceChangeListener {
-
-    static final String PREFS = "p";
-    static final int DEF_PERIOD_MIN = 5, MIN_PERIOD_MIN = 1, MAX_PERIOD_MIN = 600;
-    static final int DEF_BREAK_SEC = 40, MIN_BREAK_SEC = 5, MAX_BREAK_SEC = 3600;
-
-    /** Default of every switch: everything on except forced breaks. */
-    static boolean def(String key) {
-        return !key.endsWith("_break");
-    }
+/**
+ * Event-driven guard for Instagram/YouTube. No polling: it reacts to accessibility events of the two apps
+ * and uses a single one-shot timer for the next deadline (break, goal, free-mode end).
+ *
+ * Per app, in priority order:
+ *   1. free mode  – everything allowed until it ends, then a forced break for all apps
+ *   2. break      – app is sent to the home screen
+ *   3. daily goal – once exceeded the app opens only through GateActivity (typed phrase, max 10 min grants);
+ *                   feed rules still apply, periodic breaks do not
+ *   4. normal     – feed rules + optional periodic breaks
+ */
+public final class GuardService extends AccessibilityService {
 
     private static final int IG = 0, YT = 1;
-    private static final String[] PKG = {Rules.IG, Rules.YT};
-    private static final String[] PFX = {"ig", "yt"};
-    private static final String[] NAME = {"Instagram", "YouTube"};
-    private static final long DUMP_DELAY_MS = 6000;
-
-    private static final long ACT_GAP_MS = 800;        // min gap between redirects
+    private static final int ALLOW = 1, ALLOW_ALL = 2, BLOCK = 0;
+    private static final long ACT_GAP_MS = 800;   // min gap between redirects
+    private static final long KICK_GAP_MS = 500;
+    private static final long GATE_GAP_MS = 1500;
     private static final int MAX_ERRORS = 3;
 
     // settings
-    private final boolean[] master = new boolean[2], brk = new boolean[2], counter = new boolean[2];
-    private final long[] periodMs = new long[2], breakMs = new long[2];
+    private final boolean[] master = new boolean[2], brk = new boolean[2], goalOn = new boolean[2];
+    private final long[] periodMs = new long[2], breakMs = new long[2], goalMs = new long[2];
     private boolean igReels, igSwipe, ytShorts, ytSwipe;
 
-    // break state (per app); times are SystemClock.elapsedRealtime()
-    private int fg = -1;            // target app currently in foreground (only tracked while its break is on)
-    private long fgSince;
+    // persisted state (wall-clock ms)
+    private long freeUntil, freeTotal, lockUntil;
+    private final long[] grantUntil = new long[2], grantTotal = new long[2], usage = new long[2];
+    private int day;
+
+    // runtime
+    private int fg = -1;                 // tracked app currently in the foreground
+    private long fgSince, periodSince;
     private final long[] used = new long[2], leftAt = new long[2], breakUntil = new long[2];
+    private long nextAt, popupEnd, lastKick, lastGate, lastAct;
+    private int lastApp = -1, pageBase, errors;
+    private boolean wide, receiver;
+
+    private SharedPreferences prefs, st;
+    private Overlay overlay;
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private final Runnable[] timer = {() -> onTimer(IG), () -> onTimer(YT)};
-    private final Runnable refresher = () -> { try { refresh(SystemClock.elapsedRealtime()); } catch (Throwable t) { fail(); } };
-    private final Runnable recheck = () -> { try { checkLeft(SystemClock.elapsedRealtime(), false); } catch (Throwable t) { fail(); } };
-    private final Runnable dumper = this::dump;
-    private final BroadcastReceiver screenOff = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) {
-            try { if (fg >= 0) leave(SystemClock.elapsedRealtime()); } catch (Throwable t) { fail(); }
+    private final Runnable tick = () -> { try { onTick(); } catch (Throwable t) { fail(); } };
+    private final Runnable recheck = () -> { try { checkLeft(System.currentTimeMillis(), false); } catch (Throwable t) { fail(); } };
+    private final SharedPreferences.OnSharedPreferenceChangeListener onSettings = (p, k) -> {
+        try {
+            loadSettings();
+            reevaluate();
+        } catch (Throwable t) {
+            fail();
         }
     };
-    private Overlay overlay;
-    private boolean wide, receiver;
-    private long lastKick, lastToast;
-
-    // feed state
-    private SharedPreferences prefs;
-    private int errors;
-    private int lastApp = -1;
-    private long lastAct;
-    private int pageBase;      // identity of the first reel/short opened (0 = none)
+    private final SharedPreferences.OnSharedPreferenceChangeListener onState = (p, k) -> {
+        try {
+            if (k == null || !(k.startsWith("free_until") || k.startsWith("lock_") || k.startsWith("grant_"))) return;
+            loadState();
+            reevaluate();
+        } catch (Throwable t) {
+            fail();
+        }
+    };
+    private final BroadcastReceiver screenOff = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) {
+            try { if (fg >= 0) leave(System.currentTimeMillis()); } catch (Throwable t) { fail(); }
+        }
+    };
 
     @Override
     protected void onServiceConnected() {
         try {
-            prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-            prefs.registerOnSharedPreferenceChangeListener(this);
-            overlay = new Overlay(this, prefs);
+            prefs = getSharedPreferences(Store.SETTINGS, MODE_PRIVATE);
+            st = getSharedPreferences(Store.STATE, MODE_PRIVATE);
+            overlay = new Overlay(this, st);
+            loadSettings();
+            rollDay();
+            loadState();
+            prefs.registerOnSharedPreferenceChangeListener(onSettings);
+            st.registerOnSharedPreferenceChangeListener(onState);
             IntentFilter f = new IntentFilter(Intent.ACTION_SCREEN_OFF);
             if (Build.VERSION.SDK_INT >= 33) registerReceiver(screenOff, f, Context.RECEIVER_NOT_EXPORTED);
             else registerReceiver(screenOff, f);
             receiver = true;
-            load();
-        } catch (Throwable t) {
-            fail();
-        }
-    }
-
-    @Override
-    public void onSharedPreferenceChanged(SharedPreferences p, String k) {
-        try {
-            if (k == null || k.startsWith("ov_") || k.equals("dump")) return;
-            if (k.equals("dump_req")) {
-                handler.removeCallbacks(dumper);
-                handler.postDelayed(dumper, DUMP_DELAY_MS);
-                return;
-            }
-            load();
         } catch (Throwable t) {
             fail();
         }
     }
 
     private boolean b(String key) {
-        return prefs.getBoolean(key, def(key));
+        return prefs.getBoolean(key, Store.def(key));
     }
 
-    private void load() {
+    private void loadSettings() {
         for (int a = 0; a < 2; a++) {
-            String p = PFX[a];
+            String p = Store.PFX[a];
             master[a] = b(p);
             brk[a] = b(p + "_break");
-            counter[a] = b(p + "_counter");
-            periodMs[a] = clamp(prefs.getInt(p + "_period_min", DEF_PERIOD_MIN), MIN_PERIOD_MIN, MAX_PERIOD_MIN) * 60000L;
-            breakMs[a] = clamp(prefs.getInt(p + "_break_sec", DEF_BREAK_SEC), MIN_BREAK_SEC, MAX_BREAK_SEC) * 1000L;
-            used[a] = 0; // restart the usage period with the new settings
-            leftAt[a] = 0;
-            handler.removeCallbacks(timer[a]);
+            goalOn[a] = b(p + "_goal");
+            periodMs[a] = Store.periodMs(prefs, p);
+            breakMs[a] = Store.breakMs(prefs, p);
+            goalMs[a] = Store.goalMs(prefs, p);
         }
-        fg = -1;
-        watchAll(false);
-        refresh(SystemClock.elapsedRealtime());
         igReels = b("ig_reels");
         igSwipe = b("ig_swipe");
         ytShorts = b("yt_shorts");
         ytSwipe = b("yt_swipe");
     }
 
-    private static int clamp(int v, int lo, int hi) {
-        return Math.max(lo, Math.min(hi, v));
+    private void loadState() {
+        freeUntil = st.getLong("free_until", 0);
+        freeTotal = st.getLong("free_total", 0);
+        lockUntil = st.getLong("lock_until", 0);
+        for (int a = 0; a < 2; a++) {
+            grantUntil[a] = st.getLong("grant_" + Store.PFX[a], 0);
+            grantTotal[a] = st.getLong("grant_total_" + Store.PFX[a], 0);
+        }
+    }
+
+    /** New calendar day: today's screen time starts from zero. */
+    private void rollDay() {
+        int t = Store.roll(st);
+        if (t == day) return;
+        day = t;
+        for (int a = 0; a < 2; a++) usage[a] = st.getLong("use_" + Store.PFX[a], 0);
+    }
+
+    private void reevaluate() {
+        long now = System.currentTimeMillis();
+        if (fg >= 0 && !master[fg]) leave(now);
+        else if (fg >= 0) gate(fg, now);
+        else idle(now);
     }
 
     @Override
@@ -155,43 +173,39 @@ public final class GuardService extends AccessibilityService
         try { handler.removeCallbacksAndMessages(null); } catch (Throwable ignored) {}
         try { if (overlay != null) overlay.destroy(); } catch (Throwable ignored) {}
         try { if (receiver) { receiver = false; unregisterReceiver(screenOff); } } catch (Throwable ignored) {}
-        try { if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(this); } catch (Throwable ignored) {}
+        try {
+            if (prefs != null) prefs.unregisterOnSharedPreferenceChangeListener(onSettings);
+            if (st != null) st.unregisterOnSharedPreferenceChangeListener(onState);
+        } catch (Throwable ignored) {}
     }
 
     private void handle(AccessibilityEvent e) {
         CharSequence p = e.getPackageName();
         if (p == null) return;
-        long now = SystemClock.elapsedRealtime();
         int a = Rules.IG.contentEquals(p) ? IG : Rules.YT.contentEquals(p) ? YT : -1;
         if (a < 0) {
-            // Other apps are only heard while a break-tracked app is in front: detect leaving it.
-            if (fg < 0) { watchAll(false); return; }
-            if (e.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
-            if (getPackageName().contentEquals(p)) return;
-            checkLeft(now, true);
+            // Other apps are only heard while a tracked app is in front: notice leaving it.
+            if (fg < 0) watchAll(false);
+            else if (e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) checkLeft(System.currentTimeMillis(), true);
             return;
         }
         if (!master[a]) return;
         boolean feeds = a == IG ? (igReels || igSwipe) : (ytShorts || ytSwipe);
-        if (!feeds && !brk[a]) return;
-
-        AccessibilityNodeInfo root = foreground(a);
-        if (root == null) return;
-
+        AccessibilityNodeInfo root = null;
+        if (fg != a || feeds) { // the window is only read when it is actually needed
+            root = foreground(a);
+            if (root == null) return;
+        }
+        long now = System.currentTimeMillis();
+        if (fg != a) {
+            if (fg >= 0) leave(now);
+            enter(a, now);
+        }
         if (a != lastApp) {
             lastApp = a;
             pageBase = 0;
         }
-        if (brk[a]) {
-            if (now < breakUntil[a]) { kick(a, now); return; }
-            if (fg != a) {
-                if (fg >= 0) leave(now);
-                enter(a, now);
-            } else if (remaining(a, now) <= 0) {
-                startBreak(a, now);
-                return;
-            }
-        }
+        if (gate(a, now) != ALLOW || !feeds) return;
         if (a == IG) instagram(root, now); else youtube(root, now);
     }
 
@@ -199,37 +213,32 @@ public final class GuardService extends AccessibilityService
     private AccessibilityNodeInfo foreground(int a) {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null || root.getPackageName() == null) return null;
-        return PKG[a].contentEquals(root.getPackageName()) ? root : null;
+        return Store.PKG[a].contentEquals(root.getPackageName()) ? root : null;
     }
 
-    // ---- forced breaks ----
-
-    private long remaining(int a, long now) {
-        return periodMs[a] - used[a] - (now - fgSince);
-    }
+    // ---- foreground tracking (screen time) ----
 
     private void enter(int a, long now) {
-        // Staying away for at least one break length (or finishing a break) starts a fresh period.
-        if (breakUntil[a] != 0 || (leftAt[a] != 0 && now - leftAt[a] >= breakMs[a])) used[a] = 0;
-        breakUntil[a] = 0;
+        rollDay();
+        // Staying away for at least one break length starts a fresh period.
+        if (leftAt[a] != 0 && now - leftAt[a] >= breakMs[a]) used[a] = 0;
         fg = a;
-        fgSince = now;
-        handler.removeCallbacks(timer[a]);
-        handler.postDelayed(timer[a], Math.max(0, remaining(a, now)));
+        fgSince = periodSince = now;
+        overlay.restore();
         watchAll(true);
-        refresh(now);
     }
 
     private void leave(long now) {
         int a = fg;
         if (a < 0) return;
         fg = -1;
-        used[a] += now - fgSince;
+        usage[a] += Math.max(0, now - fgSince);
+        used[a] += Math.max(0, now - periodSince);
         leftAt[a] = now;
-        handler.removeCallbacks(timer[a]);
+        st.edit().putLong("use_" + Store.PFX[a], usage[a]).apply();
         handler.removeCallbacks(recheck);
         watchAll(false);
-        refresh(now);
+        idle(now);
     }
 
     /** Another window appeared: did the user leave the tracked app? */
@@ -243,102 +252,132 @@ public final class GuardService extends AccessibilityService
         }
     }
 
-    /** One-shot timer at the end of a usage period (covers screens that emit no events). */
-    private void onTimer(int a) {
-        try {
-            long now = SystemClock.elapsedRealtime();
-            if (fg != a || !master[a] || !brk[a]) return;
-            if (foreground(a) == null) { leave(now); return; }
-            long rem = remaining(a, now);
-            if (rem > 0) handler.postDelayed(timer[a], rem); else startBreak(a, now);
-        } catch (Throwable t) {
-            fail();
-        }
-    }
-
-    private void startBreak(int a, long now) {
-        breakUntil[a] = now + breakMs[a];
-        used[a] = 0;
-        leftAt[a] = 0;
-        handler.removeCallbacks(timer[a]);
-        if (fg == a) {
-            fg = -1;
-            watchAll(false);
-        }
-        lastKick = now;
-        performGlobalAction(GLOBAL_ACTION_HOME);
-        overlay.popup(NAME[a], breakMs[a] / 1000);
-        refresh(now);
-    }
-
-    /** App opened during its break: send home again. */
-    private void kick(int a, long now) {
-        if (now - lastKick >= 500) {
-            lastKick = now;
-            performGlobalAction(GLOBAL_ACTION_HOME);
-            if (counter[a]) overlay.pulse();
-        }
-        if (!counter[a] && now - lastToast >= 3000) {
-            lastToast = now;
-            long left = Math.max(1, (breakUntil[a] - now + 999) / 1000);
-            Toast.makeText(this, "FocusGuard: mola — " + left + " sn kaldı", Toast.LENGTH_SHORT).show();
-        }
-    }
-
-    /** Decides what the floating counter shows: time to next break (in app) or break time left. */
-    private void refresh(long now) {
-        if (overlay == null) return;
-        handler.removeCallbacks(refresher);
-        int a = fg;
-        if (a >= 0 && brk[a] && counter[a] && now >= breakUntil[a]) {
-            overlay.show(false, now + Math.max(0, remaining(a, now)), periodMs[a]);
-            return;
-        }
-        int x = -1;
-        long next = Long.MAX_VALUE;
-        for (int i = 0; i < 2; i++) {
-            if (breakUntil[i] <= now) continue;
-            next = Math.min(next, breakUntil[i]);
-            if (counter[i] && (x < 0 || breakUntil[i] > breakUntil[x])) x = i;
-        }
-        if (x >= 0) overlay.show(true, breakUntil[x], breakMs[x]); else overlay.hide();
-        if (next != Long.MAX_VALUE) handler.postDelayed(refresher, next - now + 50);
-        else overlay.dismissPopup();
-    }
-
     /** While a tracked app is in front, also listen to other apps (to notice leaving). */
     private void watchAll(boolean on) {
         if (wide == on) return;
         AccessibilityServiceInfo i = getServiceInfo();
         if (i == null) return;
-        i.packageNames = on ? null : PKG;
+        i.packageNames = on ? null : Store.PKG;
         setServiceInfo(i);
         wide = on;
     }
 
-    /** Diagnostics requested from the settings screen: save the current IG/YT window structure. */
-    private void dump() {
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            CharSequence p = root == null ? null : root.getPackageName();
-            boolean ok = p != null && (Rules.IG.contentEquals(p) || Rules.YT.contentEquals(p));
-            if (ok) prefs.edit().putString("dump", Rules.dump(root)).apply();
-            Toast.makeText(this, ok ? "FocusGuard: ekran kaydedildi" : "FocusGuard: Instagram/YouTube açık değil",
-                    Toast.LENGTH_SHORT).show();
-        } catch (Throwable t) {
-            fail();
+    // ---- modes ----
+
+    /** Decides what the foreground app may do right now, updates the counter and the next deadline. */
+    private int gate(int a, long now) {
+        if (now < freeUntil) {
+            used[a] = 0;
+            periodSince = now;
+            overlay.show(Ui.BLUE, freeUntil, freeTotal);
+            schedule(freeUntil, now);
+            return ALLOW_ALL;
         }
+        long end = breakEnd(a);
+        if (now < end) {
+            kick(a, now, end);
+            return BLOCK;
+        }
+        long today = usage[a] + Math.max(0, now - fgSince);
+        if (goalOn[a] && today >= goalMs[a]) {
+            if (now < grantUntil[a]) {
+                overlay.show(Ui.RED, grantUntil[a], grantTotal[a]);
+                schedule(grantUntil[a], now);
+                return ALLOW;
+            }
+            openGate(a, now);
+            return BLOCK;
+        }
+        long next = goalOn[a] ? now + goalMs[a] - today : 0;
+        if (brk[a]) {
+            long rem = periodMs[a] - used[a] - (now - periodSince);
+            if (rem <= 0) {
+                breakUntil[a] = now + breakMs[a];
+                used[a] = 0;
+                periodSince = now;
+                kick(a, now, breakUntil[a]);
+                return BLOCK;
+            }
+            overlay.show(Ui.GREEN, now + rem, periodMs[a]);
+            if (next == 0 || now + rem < next) next = now + rem;
+        } else {
+            overlay.hide();
+        }
+        schedule(next, now);
+        return ALLOW;
+    }
+
+    /** End of the break that currently blocks the app (0 = none). */
+    private long breakEnd(int a) {
+        return Math.max(breakUntil[a], lockUntil);
+    }
+
+    /** Break: send the app to the home screen; the first time also explain with a popup. */
+    private void kick(int a, long now, long end) {
+        if (now - lastKick < KICK_GAP_MS) return;
+        lastKick = now;
+        performGlobalAction(GLOBAL_ACTION_HOME);
+        if (popupEnd != end) {
+            popupEnd = end;
+            overlay.popup(Store.NAME[a], end - now);
+        } else {
+            overlay.pulse();
+        }
+    }
+
+    /** Daily goal exceeded: the app opens only through the gate screen. */
+    private void openGate(int a, long now) {
+        if (now - lastGate < GATE_GAP_MS) return;
+        lastGate = now;
+        overlay.hide();
+        startActivity(new Intent(this, GateActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                .putExtra("a", a));
+    }
+
+    /** No tracked app in front: show the running break (if any) until it ends. */
+    private void idle(long now) {
+        long end = 0, total = 0;
+        for (int a = 0; a < 2; a++) {
+            long e = master[a] ? breakEnd(a) : 0;
+            if (e > now && e > end) {
+                end = e;
+                total = e == lockUntil ? lockUntil - freeUntil : breakMs[a];
+            }
+        }
+        if (end > 0) {
+            overlay.show(Ui.AMBER, end, total);
+        } else {
+            overlay.hide();
+            overlay.dismissPopup();
+        }
+        schedule(end, now);
+    }
+
+    /** Single one-shot timer for the next deadline (0 = none). */
+    private void schedule(long at, long now) {
+        if (at == nextAt) return;
+        nextAt = at;
+        handler.removeCallbacks(tick);
+        if (at > 0) handler.postDelayed(tick, Math.max(0, at - now) + 30);
+    }
+
+    private void onTick() {
+        nextAt = 0;
+        long now = System.currentTimeMillis();
+        if (fg < 0) idle(now);
+        else if (foreground(fg) == null) leave(now);
+        else gate(fg, now);
     }
 
     // ---- feeds ----
 
     private void instagram(AccessibilityNodeInfo root, long now) {
-        if (!(igReels || igSwipe)) return;
         if (Rules.tabSelected(root, Rules.IG, Rules.IG_REELS_TAB_ID, Rules.IG_REELS_TAB_LABEL)) {
             pageBase = 0;
             if (igReels && ready(now)) {
                 AccessibilityNodeInfo home = Rules.byId(root, Rules.IG, Rules.IG_HOME_TAB_ID);
-                if (home == null) home = Rules.byLabel(root, Rules.IG_HOME_TAB_LABEL, Rules.BOTTOM);
+                if (home == null) home = Rules.byLabel(root, Rules.IG_HOME_TAB_LABEL, true);
                 if (home == null || !Rules.click(home)) performGlobalAction(GLOBAL_ACTION_BACK);
             }
             return;
@@ -347,11 +386,10 @@ public final class GuardService extends AccessibilityService
     }
 
     private void youtube(AccessibilityNodeInfo root, long now) {
-        if (!(ytShorts || ytSwipe)) return;
         if (Rules.tabSelected(root, Rules.YT, null, Rules.YT_SHORTS_TAB_LABEL)) {
             pageBase = 0;
             if (ytShorts && ready(now)) {
-                AccessibilityNodeInfo home = Rules.byLabel(root, Rules.YT_HOME_TAB_LABEL, Rules.BOTTOM);
+                AccessibilityNodeInfo home = Rules.byLabel(root, Rules.YT_HOME_TAB_LABEL, true);
                 if (home == null || !Rules.click(home)) performGlobalAction(GLOBAL_ACTION_BACK);
             }
             return;

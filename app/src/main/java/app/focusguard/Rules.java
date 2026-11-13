@@ -31,9 +31,6 @@ final class Rules {
 
     /** Bottom-bar labels are only accepted below this fraction of the window height. */
     static final float BOTTOM_BAR_FROM = 0.80f;
-    /** Top-bar labels are only accepted above this fraction of the window height. */
-    static final float TOP_BAR_TO = 0.18f;
-    static final int ANY = 0, BOTTOM = 1, TOP = 2;
 
     // ---- helpers ----
 
@@ -47,21 +44,20 @@ final class Rules {
         return null;
     }
 
-    /** First visible node whose text/description equals one of the labels (ANY / BOTTOM bar / TOP bar). */
-    static AccessibilityNodeInfo byLabel(AccessibilityNodeInfo root, String[] labels, int where) {
+    /** First visible node whose text/description equals one of the labels (optionally bottom bar only). */
+    static AccessibilityNodeInfo byLabel(AccessibilityNodeInfo root, String[] labels, boolean bottomOnly) {
         Rect rb = new Rect(), nb = new Rect();
         root.getBoundsInScreen(rb);
         int minTop = rb.top + (int) (rb.height() * BOTTOM_BAR_FROM);
-        int maxBottom = rb.top + (int) (rb.height() * TOP_BAR_TO);
         for (String label : labels) {
             List<AccessibilityNodeInfo> l = root.findAccessibilityNodeInfosByText(label);
             if (l == null) continue;
             for (AccessibilityNodeInfo n : l) {
                 if (n == null || !n.isVisibleToUser()) continue;
                 if (!eq(n.getText(), label) && !eq(n.getContentDescription(), label)) continue;
-                if (where != ANY) {
+                if (bottomOnly) {
                     n.getBoundsInScreen(nb);
-                    if (where == BOTTOM ? nb.top < minTop : nb.bottom > maxBottom) continue;
+                    if (nb.top < minTop) continue;
                 }
                 return n;
             }
@@ -76,7 +72,7 @@ final class Rules {
     /** Is the bottom tab (found by id, else by label) currently selected? */
     static boolean tabSelected(AccessibilityNodeInfo root, String pkg, String[] ids, String[] labels) {
         AccessibilityNodeInfo n = ids == null ? null : byId(root, pkg, ids);
-        if (n == null && labels != null) n = byLabel(root, labels, BOTTOM);
+        if (n == null && labels != null) n = byLabel(root, labels, true);
         if (n == null) return false;
         if (n.isSelected()) return true;
         for (int i = 0; i < n.getChildCount(); i++) {
@@ -117,39 +113,5 @@ final class Rules {
         }
         // Ignore until one page clearly dominates (avoids noise mid-animation).
         return bestArea * 10L >= (long) pb.width() * pb.height() * 6 ? best : 0;
-    }
-
-    /** Diagnostics: compact dump of the window (class, id, flags, short labels) so rules can be fixed. */
-    static String dump(AccessibilityNodeInfo root) {
-        StringBuilder sb = new StringBuilder();
-        sb.append(root.getPackageName()).append('\n');
-        int[] count = {0};
-        dump(root, 0, sb, count);
-        return sb.toString();
-    }
-
-    private static void dump(AccessibilityNodeInfo n, int depth, StringBuilder sb, int[] count) {
-        if (n == null || depth > 40 || count[0] >= 400) return;
-        String id = n.getViewIdResourceName();
-        CharSequence t = n.getText(), ds = n.getContentDescription();
-        if (id != null || t != null || ds != null || n.isClickable() || n.isSelected() || n.isScrollable()) {
-            count[0]++;
-            sb.append(depth).append(' ');
-            String cls = String.valueOf(n.getClassName());
-            sb.append(cls.substring(cls.lastIndexOf('.') + 1));
-            if (id != null) sb.append(" #").append(id.substring(id.indexOf('/') + 1));
-            if (n.isClickable()) sb.append(" C");
-            if (n.isSelected()) sb.append(" S");
-            if (n.isScrollable()) sb.append(" R");
-            if (ds != null) sb.append(" d=").append(cut(ds));
-            if (t != null) sb.append(" t=").append(cut(t));
-            sb.append('\n');
-        }
-        for (int i = 0; i < n.getChildCount(); i++) dump(n.getChild(i), depth + 1, sb, count);
-    }
-
-    private static String cut(CharSequence c) {
-        String s = c.toString().replace('\n', ' ');
-        return '"' + (s.length() > 24 ? s.substring(0, 24) + "…" : s) + '"';
     }
 }

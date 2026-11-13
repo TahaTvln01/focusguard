@@ -8,9 +8,14 @@ Instagram ve YouTube'daki bağımlılık yapan akışları engelleyen, zorunlu m
 2. Dosyayı aç → "Bilinmeyen uygulamaları yükle" iznini ver → **Yükle**.
 3. Android 13+: Ayarlar → Uygulamalar → FocusGuard → ⋮ → **Kısıtlanmış ayarlara izin ver**.
 4. FocusGuard'ı aç → **Erişilebilirlik ayarlarını aç** → Yüklü uygulamalar → FocusGuard → Aç.
-5. Anahtarları ve mola sürelerini istediğin gibi ayarla. Mola açıkken ekrandaki sayaç sürüklenerek taşınır.
+5. Anahtarları, mola sürelerini ve günlük hedefi istediğin gibi ayarla.
 
-Bir özellik çalışmıyorsa uygulamadaki **Tanılama kaydı al** ile ekran yapısını kaydedip issue'ya ekleyebilirsin (yazılar kısaltılır; paylaşmadan önce göz at).
+## Özellikler
+- Reels / Shorts sekmesini kapatma, açılan videodan sonrakine kaydırmayı engelleme.
+- Zorunlu mola: her X dk kullanımda Y sn mola; ekranda yuvarlak sayaç (kenara yapışır, alta sürükleyince gizlenir).
+- Günlük ekran süresi ve hedef: hedef aşılınca uygulama yalnızca onay cümlesiyle, en fazla 10 dk'lık izinlerle açılır.
+- "Bana bi dakika ver": günlük bütçe içinde tüm engelleri geçici kaldırır, bitince zorunlu mola.
+- Bir korumayı kapatmak 10 sn bekleme + onay cümlesi ister.
 
 ## Kaldırma
 Ayarlar → Uygulamalar → FocusGuard → Kaldır.
