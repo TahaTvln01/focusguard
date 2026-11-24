@@ -115,7 +115,9 @@ public final class MainActivity extends Activity {
         box.addView(general);
 
         TextView tip = Ui.text(this, "İpucu: bir satırdaki ? işaretine dokunarak o ayarın ne yaptığını görebilirsin. "
-                + "Bir korumayı kapatmak " + CONFIRM_SEC + " sn bekleme ve onay cümlesi ister.", 13, Ui.GREY, false);
+                + "Bir korumayı kapatmak ya da bir sınırı gevşetmek (hedefi/serbest süreyi artırmak, "
+                + "molayı kısaltmak, molalar arasını uzatmak) " + CONFIRM_SEC + " sn bekleme ve onay cümlesi ister.",
+                13, Ui.GREY, false);
         tip.setPadding(dp(4), dp(16), dp(4), 0);
         box.addView(tip);
 
@@ -220,7 +222,7 @@ public final class MainActivity extends Activity {
         int max = (int) Math.min(left / 1000, Store.MAX_FREE_MIN * 60L);
         pick("Ne kadar süre?", Store.NAME[a] + "'da bu sürede tüm engeller kalkar.\nBugün kalan: " + Store.dur(left),
                 "dk", "sn", Math.min(Store.MAX_FREE_MIN, max / 60), Math.min(Store.freeSec(prefs, p), max),
-                Store.MIN_FREE_SEC, max, "Başlat", total -> {
+                Store.MIN_FREE_SEC, max, "Başlat", 0, total -> {
                     long ms = total * 1000L;
                     prefs.edit().putInt(p + "_free_sec", total).apply();
                     st.edit().putLong("free_used_" + p, st.getLong("free_used_" + p, 0) + ms)
@@ -281,7 +283,7 @@ public final class MainActivity extends Activity {
         more.setPadding(0, 0, 0, 0);
         more.setOnClickListener(v -> pick(Store.NAME[a] + " günlük serbest süre",
                 "Bir günde toplam ne kadar serbest mod kullanabileceğin.", "sa", "dk", 24,
-                (int) (Store.freeDailyMs(prefs, p) / 60000), 0, Store.MAX_FREE_DAILY_MIN, "Kaydet",
+                (int) (Store.freeDailyMs(prefs, p) / 60000), 0, Store.MAX_FREE_DAILY_MIN, "Kaydet", LOOSER_UP,
                 total -> prefs.edit().putInt(p + "_free_daily_min", total).apply()));
         idle.addView(more, left(dp(46), 8));
         idle.addView(helpButton("Bana bi dakika ver", HELP_FREE), left(dp(30), 8));
@@ -321,13 +323,13 @@ public final class MainActivity extends Activity {
         times.addView(Ui.text(this, "Her ", 15, Ui.GREY, false));
         periodChip[a] = Ui.chip(this, "");
         periodChip[a].setOnClickListener(v -> pick("Kullanım süresi", "Bu kadar kullanınca mola başlar.", "sa", "dk", 10,
-                (int) (Store.periodMs(prefs, p) / 60000), 1, Store.MAX_PERIOD_MIN, "Kaydet",
+                (int) (Store.periodMs(prefs, p) / 60000), 1, Store.MAX_PERIOD_MIN, "Kaydet", LOOSER_UP,
                 total -> prefs.edit().putInt(p + "_period_min", total).apply()));
         times.addView(periodChip[a], new LinearLayout.LayoutParams(WRAP, dp(36)));
         times.addView(Ui.text(this, " kullanımda ", 15, Ui.GREY, false));
         breakChip[a] = Ui.chip(this, "");
         breakChip[a].setOnClickListener(v -> pick("Mola süresi", "Mola bu kadar sürer.", "dk", "sn", 60,
-                (int) (Store.breakMs(prefs, p) / 1000), Store.MIN_BREAK_SEC, Store.MAX_BREAK_SEC, "Kaydet",
+                (int) (Store.breakMs(prefs, p) / 1000), Store.MIN_BREAK_SEC, Store.MAX_BREAK_SEC, "Kaydet", LOOSER_DOWN,
                 total -> prefs.edit().putInt(p + "_break_sec", total).apply()));
         times.addView(breakChip[a], new LinearLayout.LayoutParams(WRAP, dp(36)));
         times.addView(Ui.text(this, " mola", 15, Ui.GREY, false));
@@ -337,7 +339,7 @@ public final class MainActivity extends Activity {
         goal.addView(Ui.text(this, "Günde en fazla ", 15, Ui.GREY, false));
         goalChip[a] = Ui.chip(this, "");
         goalChip[a].setOnClickListener(v -> pick("Günlük hedef", "Bu süreyi geçince uygulama onay ister.", "sa", "dk", 23,
-                (int) (Store.goalMs(prefs, p) / 60000), 1, 23 * 60 + 59, "Kaydet",
+                (int) (Store.goalMs(prefs, p) / 60000), 1, 23 * 60 + 59, "Kaydet", LOOSER_UP,
                 total -> prefs.edit().putInt(p + "_goal_h", total / 60).putInt(p + "_goal_m", total % 60).apply()));
         goal.addView(goalChip[a], new LinearLayout.LayoutParams(WRAP, dp(36)));
         sub.addView(goal);
@@ -435,7 +437,7 @@ public final class MainActivity extends Activity {
                 confirmed[0] = true;
                 s.setChecked(true);
                 confirmed[0] = false;
-                confirmOff(label, () -> {
+                confirm("Kapatmak istediğine emin misin?", label, "Kapat", () -> {
                     confirmed[0] = true;
                     s.setChecked(false);
                     confirmed[0] = false;
@@ -463,12 +465,16 @@ public final class MainActivity extends Activity {
 
     private interface OnPick { void set(int total); }
 
+    /** Which change of a value loosens the rule (and therefore needs the confirmation popup). */
+    private static final int LOOSER_UP = 1, LOOSER_DOWN = -1;
+
     /**
      * Two scroll wheels (big unit, small unit; total = big*60 + small), like the system timer.
      * The action button unlocks only while the total is inside [min, max].
+     * A change in the "looser" direction (see LOOSER_*) is saved only after the confirmation popup.
      */
-    private void pick(String title, String info, String big, String small, int maxBig, int current,
-                      final int min, final int max, String action, final OnPick onPick) {
+    private void pick(final String title, String info, final String big, final String small, int maxBig, int current,
+                      final int min, final int max, String action, final int looser, final OnPick onPick) {
         LinearLayout card = sheet(title);
         if (info != null) {
             TextView i = Ui.text(this, info, 14, Ui.GREY, false);
@@ -477,6 +483,7 @@ public final class MainActivity extends Activity {
             card.addView(i);
         }
         current = Store.clamp(current, min, max);
+        final int before = current;
         final NumberPicker a = Ui.wheel(this, 0, maxBig, current / 60), b = Ui.wheel(this, 0, 59, current % 60);
         LinearLayout wheels = new LinearLayout(this);
         wheels.setGravity(Gravity.CENTER);
@@ -498,9 +505,18 @@ public final class MainActivity extends Activity {
         ok.setOnClickListener(v -> {
             int total = a.getValue() * 60 + b.getValue();
             if (total < min || total > max) return;
-            onPick.set(total);
             dlg.dismiss();
-            refresh();
+            final Runnable save = () -> {
+                onPick.set(total);
+                refresh();
+            };
+            if (looser != 0 && Integer.signum(total - before) == looser) {
+                confirm("Kuralı gevşetmek istediğine emin misin?",
+                        title + ": " + Store.span(before, big, small) + " → " + Store.span(total, big, small),
+                        "Kaydet", save);
+            } else {
+                save.run();
+            }
         });
         dlg.show();
     }
@@ -518,9 +534,12 @@ public final class MainActivity extends Activity {
         dlg.show();
     }
 
-    /** Popup before a switch is turned off: wait 10 s AND type the phrase, then "Kapat" unlocks. */
-    private void confirmOff(String label, final Runnable onConfirm) {
-        LinearLayout card = sheet("Kapatmak istediğine emin misin?");
+    /**
+     * Anti-cheat popup before turning a protection off or loosening a limit:
+     * wait 10 s AND type the phrase, then the action button unlocks.
+     */
+    private void confirm(String title, String label, String action, final Runnable onConfirm) {
+        LinearLayout card = sheet(title);
         TextView what = Ui.text(this, label, 14, Ui.GREY, false);
         what.setGravity(Gravity.CENTER);
         what.setPadding(0, dp(6), 0, dp(12));
@@ -538,7 +557,7 @@ public final class MainActivity extends Activity {
         card.addView(input, new LinearLayout.LayoutParams(MATCH, WRAP));
 
         final Dialog dlg = dialog(card);
-        final Button ok = buttons(card, dlg, "Kapat");
+        final Button ok = buttons(card, dlg, action);
         Ui.able(ok, false);
         final boolean[] waited = {false};
         final Runnable update = () -> Ui.able(ok, waited[0]
